@@ -33,7 +33,7 @@ class PriceResponse(BaseModel):
 
 class PortfolioCreate(BaseModel):
     nombre: str = Field(..., min_length=1, max_length=100)
-    descipcion: Optional[str] = None
+    descripcion: Optional[str] = None
     tickers: list[str] = Field(..., min_legth=1, description="Lista de tickers en el portafolio")
     pesos: dict[str, float] = Field(...)
 
