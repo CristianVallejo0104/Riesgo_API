@@ -1,10 +1,10 @@
 import sqlite3
 from typing import Generator
 
-from sqlachemy import create_engine, event, Engine
+from sqlalchemy import create_engine, event, Engine
 from sqlalchemy.orm import sessionmaker, Session, DeclarativeBase
 
-from app.config import settings
+from app.config import get_settings
 
 class Base(DeclarativeBase):
     """Clase base para todos los modelos ORM."""

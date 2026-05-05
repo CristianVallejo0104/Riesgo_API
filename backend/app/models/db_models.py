@@ -52,4 +52,4 @@ class PredictionLog(Base):
     features: Mapped[dict] = mapped_column(JSON, nullable=False)  # Guardar características como JSON
     prediccion: Mapped[float] = mapped_column(Float, nullable=False)
     modelo_version: Mapped[str] = mapped_column(String(20), nullable=False)
-    creado_en: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    creado_en: Mapped[datetime] = mapped_column(DateTime, server_default=func.now()) 
