@@ -11,7 +11,7 @@ class Asset(Base):
 
     id: Mapped [int] = mapped_column(Integer, primary_key=True, index=True)
     ticker: Mapped[str]= mapped_column(String(10), unique=True, index=True, nullable=False)
-    nome: Mapped[str]= mapped_column(String(100), nullable=True)
+    nombre: Mapped[str]= mapped_column(String(100), nullable=True)
     sector: Mapped[str]= mapped_column(String(50), nullable=True)
     moneda: Mapped[str] = mapped_column(String(10), default="USD")
     creado_en: Mapped[datetime]= mapped_column(DateTime, server_default=func.now())

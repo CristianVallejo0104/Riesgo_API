@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
 from app.database import init_db   
-
+from app.routers import activos
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -33,3 +33,6 @@ app.add_middleware(
 @app.get("/health")
 def healt_check():
     return {"status": "ok", "app": settings.app_name, "version": settings.app_version, "entorno": settings.entorno}
+
+
+app.include_router(activos.router)
