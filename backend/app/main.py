@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
 from app.database import init_db   
-from app.routers import activos, portafolios
+from app.routers import activos, portafolios, precios 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -38,3 +38,5 @@ def healt_check():
 app.include_router(activos.router)
 
 app.include_router(portafolios.router)
+
+app.include_router(precios.router)
