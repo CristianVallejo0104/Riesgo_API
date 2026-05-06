@@ -1,12 +1,16 @@
 import pandas as pd
+import numpy as np
 from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import select
 
 from app.dependencies import DBSession
 from app.models.db_models import Asset, Price
 from app.services.risk import RiskService
+from app.services.portfolio import PortfolioService
+from app.services.data import DataService
+from app.config import get_settings
 
-
+settings = get_settings()
 router = APIRouter(prefix="/analisis", tags=["Análisis de Riesgo"])
 
 
@@ -64,4 +68,26 @@ def calcular_ewma(ticker: str, db: DBSession):
     return {
         "ticker": ticker,
         "volatilidad_ewma": servicio.volatilidad_ewma(),
+    }
+
+@router.get("/markowitz")
+def optimizar_portafolio(db: DBSession, permitir_cortos: bool = False):
+    servicio_data = DataService(db)
+    tickers = settings.default_tickers
+
+    rendimientos = {}
+    for ticker in tickers:
+        precios = servicio_data.descargar_precios(ticker)
+        if precios:
+            df = pd.DataFrame([{"fecha": p.fecha, "close": p.close} for p in precios])
+            df.set_index("fecha", inplace=True)
+            rendimientos[ticker] = np.log(df["close"] / df["close"].shift(1)).dropna()
+
+    df_rend = pd.DataFrame(rendimientos).dropna()
+    servicio = PortfolioService(df_rend)
+
+    return {
+        "tickers": tickers,
+        "optimizacion": servicio.optimizar_markowitz(permitir_cortos),
+        "frontera": servicio.frontera_eficiente(n_puntos=20),
     }
