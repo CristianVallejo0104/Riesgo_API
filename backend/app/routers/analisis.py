@@ -10,6 +10,8 @@ from app.services.risk import RiskService
 from app.services.portfolio import PortfolioService
 from app.services.data import DataService,  TechnicalIndicators
 from app.config import get_settings
+from app.services.stress import StressService
+
 
 settings = get_settings()
 router = APIRouter(prefix="/analisis", tags=["Análisis de Riesgo"])
@@ -134,3 +136,20 @@ def calcular_rendimientos(ticker: str, db: DBSession):
             "es_normal": float(shapiro_pvalue) > 0.05,
         },
     }
+
+@router.get("/stress-test")
+def stress_test(db: DBSession):
+    servicio_data = DataService(db)
+    tickers = settings.default_tickers
+
+    rendimientos = {}
+    for ticker in tickers:
+        precios = servicio_data.descargar_precios(ticker)
+        if precios:
+            df = pd.DataFrame([{"fecha": p.fecha, "close": p.close} for p in precios])
+            df.set_index("fecha", inplace=True)
+            rendimientos[ticker] = np.log(df["close"] / df["close"].shift(1)).dropna()
+
+    df_rend = pd.DataFrame(rendimientos).dropna()
+    servicio = StressService(df_rend)
+    return {"escenarios": servicio.stress_test()}

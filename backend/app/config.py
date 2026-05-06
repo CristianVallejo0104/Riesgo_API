@@ -33,7 +33,7 @@ class Settings(BaseSettings):
     ml_model_version: str = "1.0.0"
 
     cors_origins: list[str] = ["http://localhost:8501", "http://127.0.0.1:8501"]
-    model_config = SettingsConfigDict(env_file="backend/.env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
 
 
