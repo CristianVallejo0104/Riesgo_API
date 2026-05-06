@@ -169,10 +169,10 @@ with tabs[4]:
                 col1, col2 = st.columns(2)
                 with col1:
                     st.metric("VaR Paramétrico", f"{data['var_parametrico']:.6f}")
-                    st.metric("VaR Histórico", f"{data['var_historico']:.6f}")
+                    st.metric("Pérdida estimada", f"${abs(data['var_parametrico']) * valor_portafolio:,.2f}")
                 with col2:
-                    st.metric("VaR Monte Carlo", f"{data['var_montecarlo']:.6f}")
                     st.metric("CVaR", f"{data['cvar']:.6f}")
+                    st.metric("Pérdida extrema", f"${abs(data['cvar']) * valor_portafolio:,.2f}")
 
                 fig = go.Figure()
                 fig.add_trace(go.Bar(
