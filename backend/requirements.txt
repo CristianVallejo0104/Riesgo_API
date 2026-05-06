@@ -17,3 +17,4 @@ pytest-asyncio==0.23.7
 arch==7.1.0
 cvxpy==1.5.3
 fredapi==0.5.2
+plotly==6.7.0
