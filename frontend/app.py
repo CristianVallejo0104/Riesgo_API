@@ -8,24 +8,31 @@ API_URL = "http://127.0.0.1:8000"
 
 st.set_page_config(page_title="RiskLab USTA", layout="wide")
 
-# ── Sidebar con contexto del proyecto ──
-st.sidebar.title("RiskLab USTA")
-st.sidebar.markdown("""
-**Proyecto Integrador CIII**  
-Sistema integral de análisis de riesgo financiero.
+# ── Sidebar ──
+with st.sidebar:
+    st.title("RiskLab USTA")
+    st.markdown("**Proyecto Integrador CIII**")
+    st.markdown("---")
 
-**Objetivo:** Construir una API REST con FastAPI 
-que integre análisis técnico, modelos de riesgo, 
-optimización de portafolios, renta fija, opciones 
-y machine learning, con persistencia en SQLite 
-y despliegue en contenedores.
+    ticker = st.selectbox("Ticker activo", ["AAPL", "JPM", "JNJ", "XOM", "KO"])
 
-**Activos:** AAPL, JPM, JNJ, XOM, KO  
-**Benchmark:** S&P 500 (^GSPC)  
-**Datos:** Yahoo Finance + FRED API
-""")
+    st.markdown("---")
+    st.markdown("**Parámetros de Riesgo**")
+    
+    confianza_var = st.slider(
+        "Nivel de confianza VaR",
+        min_value=0.90, max_value=0.99,
+        value=0.95, step=0.01, format="%.2f",
+    )
 
-ticker = st.sidebar.text_input("Ticker activo", value="AAPL")
+    valor_portafolio = st.number_input(
+        "Valor del portafolio (USD)",
+        min_value=1000.0, max_value=10_000_000.0,
+        value=100_000.0, step=10_000.0,
+    )
+
+    st.markdown("---")
+    st.caption("RiskLab USTA · Teoría del Riesgo + Python APIs")
 
 # ── Tabs por módulo ──
 tabs = st.tabs([
