@@ -22,6 +22,8 @@ class Settings(BaseSettings):
     macd_fast: int = 12
     macd_slow: int = 26
     macd_signal: int = 9
+    stochastic_k_period: int = 14
+    stochastic_d_period: int = 3
     bollinger_period: int = 20
     bollinger_std: float = 2.0
     fred_risk_free_series: str = "DGS3MO"
