@@ -6,9 +6,24 @@ from sqlalchemy import select
 from app.dependencies import DBSession
 from app.models.db_models import Asset, Price
 from app.models.schemas import PriceResponse
+from app.services.data import DataService
+
 
 
 router = APIRouter(prefix="/precios", tags=["Precios"])
+
+
+@router.post("/descargar/{ticker}", response_model=list[PriceResponse])
+def descargar_precios(ticker: str, db: DBSession):
+    servicio=DataService(db)
+    precios = servicio.descargar_precios(ticker)
+    if not precios:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No se encontraron precios para {ticker}",
+        )
+    return precios
+
 
 @router.get("/{ticker}", response_model=list[PriceResponse])
 def obtener_precios(ticker: str, db: DBSession):
