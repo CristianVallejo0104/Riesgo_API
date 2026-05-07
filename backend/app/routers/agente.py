@@ -23,7 +23,7 @@ def _llamar_ollama(prompt: str) -> str:
         r = requests.post(
             OLLAMA_URL,
             json={"model": OLLAMA_MODEL, "prompt": prompt, "stream": False},
-            timeout=180,
+            timeout=600,
         )
         r.raise_for_status()
         return r.json().get("response", "Sin respuesta del modelo.")
@@ -122,7 +122,7 @@ Evalúa el Sharpe Ratio y si la compensación riesgo-retorno es adecuada.
 💡 RECOMENDACIONES
 Da 3 recomendaciones concretas de gestión de riesgo basadas en los datos.
 
-Sé directo, profesional y usa terminología financiera apropiada. Máximo 400 palabras."""
+Sé directo y conciso. Máximo 200 palabras en total."""
 
     respuesta = _llamar_ollama(prompt)
     return {

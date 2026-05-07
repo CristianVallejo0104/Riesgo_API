@@ -566,23 +566,23 @@ with tabs[3]:
 with tabs[4]:
     st.subheader("🎯 CAPM — Capital Asset Pricing Model")
     st.info("El CAPM determina el rendimiento esperado de un activo basado en su riesgo sistemático (Beta) frente al mercado.")
-    cache_key_m4=f"capm_{'-'.join(tickers)}_{benchmark}"
-    if st.button("🔄 Calcular CAPM", key="btn_m4"):
-        descargar_si_no_existe(benchmark)
-        if cache_key_m4 not in st.session_state:
-            with st.spinner("Consultando FRED y calculando métricas en el servidor..."):
-                rf_real = 0.04
-                try:
-                    curva = api_get("/renta-fija/curva")
-                    if curva and "datos_mercado" in curva and "tasas" in curva["datos_mercado"]:
-                        rf_real = curva["datos_mercado"]["tasas"][0] / 100
-                except:
-                    pass
-                st.session_state[cache_key_m4] = api_get("/analisis/capm", params={
-                    "tickers": tickers,
-                    "benchmark": benchmark,
-                    "tasa_libre_riesgo": rf_real
-                })
+
+    cache_key_m4 = f"capm_{'-'.join(tickers)}_{benchmark}"
+    if cache_key_m4 not in st.session_state:
+        with st.spinner("Consultando FRED y calculando CAPM..."):
+            descargar_si_no_existe(benchmark)
+            rf_real = 0.04
+            try:
+                curva = api_get("/renta-fija/curva")
+                if curva and "datos_mercado" in curva and "tasas" in curva["datos_mercado"]:
+                    rf_real = curva["datos_mercado"]["tasas"][0] / 100
+            except:
+                pass
+            st.session_state[cache_key_m4] = api_get("/analisis/capm", params={
+                "tickers": tickers,
+                "benchmark": benchmark,
+                "tasa_libre_riesgo": rf_real
+            })
         data_capm = st.session_state.get(cache_key_m4)
 
         
@@ -1426,7 +1426,7 @@ with tabs[11]:
             with st.spinner("Ejecutando simulación de crisis..."):
                 st.session_state["stress_test"] = api_get("/analisis/stress-test")
         data_st = st.session_state.get("stress_test")    
-        
+
         if data_st:
             # 1. Gráfico de Impacto Global
             df_st = pd.DataFrame(data_st["escenarios"])
