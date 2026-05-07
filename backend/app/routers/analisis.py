@@ -76,7 +76,7 @@ def calcular_ewma(ticker: str, db: DBSession):
     }
 
 @router.get("/markowitz", response_model=MarkowitzResponse)
-def optimizar_portafolio(db: DBSession, permitir_cortos: bool = False)
+def optimizar_portafolio(db: DBSession, permitir_cortos: bool = False):
     servicio_data = DataService(db)
     tickers = settings.default_tickers
 
