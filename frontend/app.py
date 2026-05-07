@@ -67,10 +67,13 @@ def api_post(ep, body=None):
         st.error(f"❌ {e}"); return None
 
 def descargar_si_no_existe(ticker):
-    """Descarga precios si no existen en BD."""
-    r = api_get(f"/precios/{ticker}")
-    if r is not None and len(r) == 0:
-        api_post(f"/precios/descargar/{ticker}")
+    """Descarga precios si no existen en BD (maneja 404 silenciosamente)."""
+    try:
+        r = requests.get(f"{API}/precios/{ticker}", timeout=30)
+        if r.status_code == 404 or (r.status_code == 200 and len(r.json()) == 0):
+            api_post(f"/precios/descargar/{ticker}")
+    except Exception:
+        pass
 
 # ═══════════════════ TICKERS DB ═══════════════════
 
@@ -219,7 +222,7 @@ with tabs[1]:
     with st.spinner("Descargando precios de todos los activos..."):
         for t in tickers:
             descargar_si_no_existe(t)
-
+        descargar_si_no_existe(benchmark)
     # Comparación de todos
     st.markdown("### Rendimiento comparado — Todos los activos (Base 100)")
     fig_comp = go.Figure()
