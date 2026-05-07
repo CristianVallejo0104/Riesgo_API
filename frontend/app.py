@@ -3,13 +3,55 @@ frontend/app.py — RiskLab USTA Dashboard CIII
 Consume los endpoints del backend FastAPI.
 Correr: streamlit run frontend/app.py
 """
-
+import urllib.parse 
 import requests
 import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 import plotly.express as px
+
+
+def plotly_layout(title, height=350, xaxis_title="", yaxis_title=""):
+    """
+    Función auxiliar para aplicar un estilo profesional y coherente
+    a todas las gráficas de Plotly en el dashboard.
+    """
+    return {
+        "title": {
+            "text": f"<b>{title}</b>",
+            "font": {"size": 18, "color": "#FFFFFF"},
+            "x": 0, "xanchor": "left"
+        },
+        "paper_bgcolor": "rgba(0,0,0,0)",
+        "plot_bgcolor": "rgba(0,0,0,0)",
+        "height": height,
+        "margin": dict(l=40, r=20, t=60, b=40),
+        "xaxis": {
+            "title": xaxis_title,
+            "gridcolor": "#334155",
+            "showgrid": True,
+            "zeroline": False,
+            "tickfont": {"color": "#94a3b8"}
+        },
+        "yaxis": {
+            "title": yaxis_title,
+            "gridcolor": "#334155",
+            "showgrid": True,
+            "zeroline": False,
+            "tickfont": {"color": "#94a3b8"}
+        },
+        "legend": {
+            "font": {"color": "#FFFFFF"},
+            "bgcolor": "rgba(0,0,0,0)",
+            "orientation": "h",
+            "yanchor": "bottom",
+            "y": 1.02,
+            "xanchor": "right",
+            "x": 1
+        },
+        "font": {"family": "Inter, Segoe UI, Roboto, sans-serif"}
+    }
 
 st.set_page_config(page_title="RiskLab USTA", page_icon="📊", layout="wide", initial_sidebar_state="expanded")
 
@@ -139,6 +181,20 @@ st.markdown(f"""
        Inversión: <strong>${valor_portafolio:,.0f}</strong></p>
 </div>
 """, unsafe_allow_html=True)
+
+
+# --- CARGA GLOBAL DE TASA (TU FRED API) ---
+tasa_fred = 0.045 # Respaldo
+try:
+    curva_data = api_get("/renta-fija/curva")
+    if curva_data and "datos_mercado" in curva_data:
+        # Convertimos a lista para evitar el error de dict_values
+        tasa_fred = list(curva_data["datos_mercado"]["tasas"])[0] / 100
+        # Mostramos en el sidebar que la conexión fue exitosa
+        st.sidebar.success(f"🔌 FRED Online: {tasa_fred*100:.2f}%")
+except Exception as e:
+    st.sidebar.error("⚠️ FRED Offline (Usando base 4.5%)")
+
 
 # ═══════════════════ TABS ═══════════════════
 
@@ -281,304 +337,1136 @@ with tabs[1]:
 
 with tabs[2]:
     st.subheader("📉 Rendimientos y Propiedades Empíricas")
-    ticker_r = st.selectbox("Activo", tickers, key="m2_ticker")
+    
+    ticker_r = st.selectbox("Seleccione un activo para analizar", tickers, key="m2_ticker")
 
-    with st.spinner("Calculando rendimientos..."):
-        data_r = api_get(f"/analisis/rendimientos/{ticker_r}")
+    with st.spinner("Calculando métricas y procesando series de tiempo..."):
+        # 1. Obtenemos estadísticas del backend
+        data_stats = api_get(f"/analisis/rendimientos/{urllib.parse.quote(ticker_r, safe='')}")
+        
+        # 2. Obtenemos precios para las gráficas
+        precios_r = api_get(f"/precios/{urllib.parse.quote(ticker_r, safe='')}")
 
-    if data_r:
+    if data_stats and precios_r:
+        # Procesamiento de datos para gráficas
+        df_p = pd.DataFrame(precios_r)
+        df_p["fecha"] = pd.to_datetime(df_p["fecha"])
+        df_p.set_index("fecha", inplace=True)
+        # Calculamos rendimientos logarítmicos
+        df_p["rendimiento_log"] = np.log(df_p["close"] / df_p["close"].shift(1))
+        df_p = df_p.dropna()
+        
+        # ── 1. Métricas Principales (Fusión de ambos proyectos) ────────────────
         c1, c2, c3, c4, c5 = st.columns(5)
-        c1.metric("Media diaria", f"{data_r['media_diaria']*100:.4f}%")
-        c2.metric("Vol. diaria", f"{data_r['std_diaria']*100:.4f}%")
-        c3.metric("Asimetría", f"{data_r['asimetria']:.3f}")
-        c4.metric("Curtosis", f"{data_r['curtosis']:.3f}")
-        c5.metric("Observaciones", data_r["n_observaciones"])
+        c1.metric("Media Diaria", f"{data_stats['media_diaria']*100:.4f}%")
+        c2.metric("Volatilidad Diaria", f"{data_stats['std_diaria']*100:.4f}%")
+        c3.metric("Asimetría (Skew)", f"{data_stats['asimetria']:.3f}")
+        c4.metric("Curtosis", f"{data_stats['curtosis']:.3f}")
+        # Percentil 5% (Cálculo local para complementar)
+        p5_val = df_p["rendimiento_log"].quantile(0.05)
+        c5.metric("Peor día (5%)", f"{p5_val*100:.2f}%")
 
-        col1, col2 = st.columns(2)
-        with col1:
-            st.metric("Media anualizada", f"{data_r['media_anual']*100:.2f}%")
-            st.metric("Volatilidad anualizada", f"{data_r['std_anual']*100:.2f}%")
-        with col2:
-            jb, sw = data_r["jarque_bera"], data_r["shapiro_wilk"]
-            st.metric("Jarque-Bera p-value", f"{jb['p_value']:.6f}",
-                      delta="Normal ✅" if jb["es_normal"] else "No normal ⚠️",
-                      delta_color="normal" if jb["es_normal"] else "inverse")
-            st.metric("Shapiro-Wilk p-value", f"{sw['p_value']:.6f}",
-                      delta="Normal ✅" if sw["es_normal"] else "No normal ⚠️",
-                      delta_color="normal" if sw["es_normal"] else "inverse")
+        st.markdown("---")
 
-        with st.expander("ℹ️ Hechos estilizados"):
-            st.markdown("""
-            - **Colas pesadas:** curtosis > 3 → más eventos extremos que la normal
-            - **Agrupamiento de volatilidad:** períodos agitados se suceden
-            - **Asimetría negativa:** caídas más pronunciadas que subidas
-            - **No normalidad:** Jarque-Bera y Shapiro-Wilk rechazan normalidad → justifica GARCH y VaR histórico
+        # ── 2. Visualización de Series y Distribución ──────────────────────────
+        col_a, col_b = st.columns(2)
+
+        with col_a:
+            # Serie de rendimientos log (Estilo área del proyecto anterior)
+            fig_rend = go.Figure()
+            fig_rend.add_trace(go.Scatter(
+                x=df_p.index, y=df_p["rendimiento_log"] * 100,
+                name="Rend. log diario", 
+                line=dict(color="#A78BFA", width=0.8),
+                fill="tozeroy", 
+                fillcolor="rgba(167,139,250,0.1)",
+            ))
+            try:
+                fig_rend.update_layout(**plotly_layout("Serie de rendimientos log diarios (%)", height=350))
+            except:
+                fig_rend.update_layout(title="Rendimientos diarios (%)", height=350, template="plotly_dark")
+            st.plotly_chart(fig_rend, use_container_width=True)
+
+        with col_b:
+            # Histograma vs Normal
+            rend_vals = df_p["rendimiento_log"] * 100
+            mu, sigma = rend_vals.mean(), rend_vals.std()
+            x_norm = np.linspace(rend_vals.min(), rend_vals.max(), 200)
+            # Curva normal teórica
+            y_norm = (1 / (sigma * np.sqrt(2 * np.pi))) * np.exp(-0.5 * ((x_norm - mu) / sigma) ** 2)
+
+            fig_hist = go.Figure()
+            fig_hist.add_trace(go.Histogram(
+                x=rend_vals, nbinsx=60, name="Distribución Real",
+                histnorm="probability density",
+                marker_color="#f43f5e", opacity=0.6,
+            ))
+            fig_hist.add_trace(go.Scatter(
+                x=x_norm, y=y_norm, name="Normal Teórica",
+                line=dict(color="#3b82f6", width=2),
+            ))
+            try:
+                fig_hist.update_layout(**plotly_layout("Histograma vs Normal Teórica", height=350))
+            except:
+                fig_hist.update_layout(title="Distribución", height=350, template="plotly_dark")
+            st.plotly_chart(fig_hist, use_container_width=True)
+
+        # ── 3. Análisis de Colas y Comparativa ────────────────────────────────
+        col_c, col_d = st.columns(2)
+
+        with col_c:
+            # Q-Q Plot (Mejorado estadísticamente)
+            rend_sorted = np.sort(df_p["rendimiento_log"].dropna())
+            # Cuantiles teóricos usando scipy
+            from scipy import stats as sp_stats
+            cuantiles_teo = sp_stats.norm.ppf(np.linspace(0.01, 0.99, len(rend_sorted)), loc=df_p["rendimiento_log"].mean(), scale=df_p["rendimiento_log"].std())
+            
+            fig_qq = go.Figure()
+            fig_qq.add_trace(go.Scatter(
+                x=cuantiles_teo, y=rend_sorted,
+                mode="markers", name="Datos Observados",
+                marker=dict(color="#A5B4FC", size=4, opacity=0.7),
+            ))
+            fig_qq.add_trace(go.Scatter(
+                x=[min(cuantiles_teo), max(cuantiles_teo)],
+                y=[min(cuantiles_teo), max(cuantiles_teo)],
+                name="Línea 45°", line=dict(color="#ef4444", dash="dash"),
+            ))
+            try:
+                fig_qq.update_layout(**plotly_layout("Q-Q Plot vs Normalidad", height=350, xaxis_title="Cuantiles Teóricos", yaxis_title="Cuantiles Observados"))
+            except:
+                fig_qq.update_layout(title="Q-Q Plot", height=350, template="plotly_dark")
+            st.plotly_chart(fig_qq, use_container_width=True)
+
+        with col_d:
+            # Boxplot Comparativo (Top 5 activos del portafolio)
+            fig_box = go.Figure()
+            for t in tickers[:5]:
+                dr_box = api_get(f"/precios/{urllib.parse.quote(t, safe='')}")
+                if dr_box:
+                    df_box = pd.DataFrame(dr_box)
+                    r_log = np.log(df_box["close"] / df_box["close"].shift(1)).dropna()
+                    fig_box.add_trace(go.Box(y=r_log * 100, name=t, boxpoints="outliers", marker_size=2))
+            try:
+                fig_box.update_layout(**plotly_layout("Comparativa de Volatilidad (Boxplot %)", height=350))
+            except:
+                fig_box.update_layout(title="Boxplot", height=350, template="plotly_dark")
+            st.plotly_chart(fig_box, use_container_width=True)
+
+        # ── 4. Pruebas de Normalidad y Conclusión ────────────────────────────
+        st.markdown("#### ⚖️ Pruebas de Normalidad Formales")
+        jb, sw = data_stats["jarque_bera"], data_stats["shapiro_wilk"]
+        
+        ce1, ce2, ce3 = st.columns(3)
+        ce1.metric(
+            "Jarque-Bera (p-valor)", f"{jb['p_value']:.6f}",
+            delta="Normal ✅" if jb["es_normal"] else "No normal ⚠️",
+            delta_color="normal" if jb["es_normal"] else "inverse"
+        )
+        ce2.metric(
+            "Shapiro-Wilk (p-valor)", f"{sw['p_value']:.6f}",
+            delta="Normal ✅" if sw["es_normal"] else "No normal ⚠️",
+            delta_color="normal" if sw["es_normal"] else "inverse"
+        )
+        ce3.metric(
+            "Conclusión Estadística", 
+            "✅ Distribución Normal" if jb["es_normal"] and sw["es_normal"] else "⚠️ Evidencia de Colas Pesadas"
+        )
+
+        with st.expander("ℹ️ Hechos Estilizados de los Rendimientos"):
+            st.markdown(f"""
+            Al analizar **{ticker_r}**, observamos las propiedades típicas de las series financieras:
+            - **Exceso de Curtosis:** Con una curtosis de **{data_stats['curtosis']:.2f}**, el activo presenta colas más anchas que una normal (leptocurtosis).
+            - **Asimetría:** El valor de **{data_stats['asimetria']:.2f}** indica si el activo tiende a presentar caídas más extremas que subidas.
+            - **Agrupamiento de Volatilidad:** Nota en la serie de tiempo cómo los picos de varianza suelen ocurrir en grupos.
+            - **Impacto en el Riesgo:** La falla en las pruebas de Jarque-Bera y Shapiro-Wilk justifica el uso de modelos como **GARCH** para la volatilidad y **VaR Histórico** para el riesgo.
             """)
-
 
 # ═══════════════════ MÓD 3 — VOLATILIDAD ═══════════════════
 
 with tabs[3]:
-    st.subheader("🌊 Volatilidad — EWMA + GARCH")
-    if st.button("🔄 Calcular volatilidad", key="btn_m3"):
-        with st.spinner("Ajustando modelos..."):
-            ewma = api_get(f"/analisis/ewma/{ticker_sel}")
-            garch = api_get(f"/analisis/garch/{ticker_sel}")
-        if ewma and garch:
-            col1, col2 = st.columns(2)
-            with col1:
-                st.markdown("### EWMA")
-                st.metric("Volatilidad EWMA Anual", f"{ewma['volatilidad_ewma']:.4f}")
-                st.info("Lambda = 0.94 (estándar RiskMetrics). Da más peso a datos recientes.")
-            with col2:
-                st.markdown("### GARCH")
-                st.metric("Modelo", garch.get("orden", "N/A"))
-                c1, c2 = st.columns(2)
-                c1.metric("AIC", garch.get("aic", "N/A"))
-                c2.metric("BIC", garch.get("bic", "N/A"))
-                st.metric("Persistencia", garch.get("persistencia", "N/A"))
-                st.info("Se prueban GARCH(1,1), (1,2), (2,1), (2,2) y se elige por menor AIC.")
+    st.subheader("🌊 Volatilidad Condicional — EWMA & ARCH/GARCH")
+    st.info(
+        "Los modelos condicionales capturan el **agrupamiento de volatilidad (Volatility Clustering)**: "
+        "períodos agitados tienden a seguir a períodos agitados, y períodos de calma siguen a períodos de calma. "
+        "La volatilidad no es constante, depende de la memoria del mercado.",
+        icon="💡",
+    )
+
+    ticker_g = st.selectbox("Seleccione un activo para modelar", tickers, key="m3_ticker")
+
+    if st.button("🔄 Analizar Volatilidad Condicional", key="btn_m3"):
+        with st.spinner("Consultando modelos EWMA y GARCH en el servidor..."):
+            safe_ticker = urllib.parse.quote(ticker_g, safe='')
+            
+            # Consultamos los 3 endpoints necesarios
+            ewma_data = api_get(f"/analisis/ewma/{safe_ticker}")
+            garch_data = api_get(f"/analisis/garch/{safe_ticker}")
+            precios_data = api_get(f"/precios/{safe_ticker}")
+
+        if ewma_data and garch_data and precios_data:
+            # ── 1. Procesamiento para el Gráfico de Volatilidad ────────────────
+            df_p = pd.DataFrame(precios_data)
+            df_p["fecha"] = pd.to_datetime(df_p["fecha"])
+            df_p.set_index("fecha", inplace=True)
+            
+            # Cálculo de rendimientos logarítmicos y volatilidad móvil
+            df_p["rendimiento_log"] = np.log(df_p["close"] / df_p["close"].shift(1))
+            df_p = df_p.dropna()
+            df_p["vol_movil"] = df_p["rendimiento_log"].rolling(21).std() * np.sqrt(252) * 100
+
+            # ── 2. Gráfico de Volatility Clustering ─────────────────────────────
+            fig_vol = go.Figure()
+            
+            # Serie de rendimientos absolutos (fondo)
+            fig_vol.add_trace(go.Scatter(
+                x=df_p.index,
+                y=df_p["rendimiento_log"].abs() * 100,
+                name="|Rendimiento| diario",
+                line=dict(color="rgba(167, 139, 250, 0.4)", width=0.8), # Morado semitransparente
+            ))
+            
+            # Línea de volatilidad móvil (frente)
+            fig_vol.add_trace(go.Scatter(
+                x=df_p.index, 
+                y=df_p["vol_movil"],
+                name="Volatilidad móvil 21 días (Anual)",
+                line=dict(color="#ED1E79", width=2), # Rosa fuerte
+            ))
+            
+            try:
+                fig_vol.update_layout(**plotly_layout("Agrupamiento de Volatilidad (Volatility Clustering)", height=380, yaxis_title="Magnitud (%)"))
+            except:
+                fig_vol.update_layout(title="Agrupamiento de Volatilidad", height=380, template="plotly_dark", yaxis_title="%")
+                
+            st.plotly_chart(fig_vol, use_container_width=True)
+
+            st.divider()
+
+            # ── 3. Métricas de los Modelos (EWMA y GARCH) ──────────────────────
+            st.markdown("#### Comparativa de Modelos de Volatilidad")
+            col_ewma, col_garch = st.columns(2)
+
+            with col_ewma:
+                st.markdown("##### 📉 Estimación EWMA (RiskMetrics)")
+                # Asumimos que el backend devuelve un decimal, lo pasamos a %
+                vol_ewma = ewma_data.get('volatilidad_ewma', 0)
+                st.metric("Volatilidad EWMA Anualizada", f"{vol_ewma * 100:.2f}%" if vol_ewma < 1 else f"{vol_ewma:.2f}%")
+                
+                st.info("Lambda (λ) = 0.94. El modelo de Suavizado Exponencial (EWMA) otorga exponencialmente mayor peso a los choques de mercado más recientes, reaccionando rápido a las crisis.")
+
+            with col_garch:
+                st.markdown("##### 🌊 Modelo Óptimo GARCH")
+                # Mostramos el modelo que el backend eligió como el mejor
+                modelo_optimo = garch_data.get("orden", "N/A")
+                st.metric("Mejor Modelo (Selección Automática)", modelo_optimo)
+                
+                c1, c2, c3 = st.columns(3)
+                c1.metric("AIC", round(garch_data.get("aic", 0), 2))
+                c2.metric("BIC", round(garch_data.get("bic", 0), 2))
+                
+                persistencia = garch_data.get("persistencia", 0)
+                c3.metric("Persistencia (α+β)", f"{persistencia:.4f}")
+                
+                # Análisis dinámico de persistencia
+                if persistencia > 0.98:
+                    msg_persistencia = "Extremadamente alta (>0.98). Los shocks de volatilidad son casi permanentes."
+                elif persistencia > 0.90:
+                    msg_persistencia = "Alta (>0.90). El mercado tardará mucho tiempo en calmarse tras un shock."
+                else:
+                    msg_persistencia = "Moderada. La volatilidad revierte a su media razonablemente rápido."
+                    
+                st.success(f"**Análisis de Persistencia:** {msg_persistencia}")
+
+        else:
+            st.error("⚠️ No se pudieron obtener los datos de volatilidad. Verifica que los endpoints '/ewma' y '/garch' funcionen correctamente en el backend.")
 
 
 # ═══════════════════ MÓD 4 — CAPM ═══════════════════
 
 with tabs[4]:
-    st.subheader("🎯 CAPM y Beta")
-    st.info("El CAPM compara el rendimiento del activo vs el benchmark para determinar "
-            "si genera valor por encima del riesgo asumido.")
-    st.warning("⚠️ Módulo CAPM en desarrollo — requiere sincronización de rendimientos con el benchmark.")
+    st.subheader("🎯 CAPM — Capital Asset Pricing Model")
+    st.info("El CAPM determina el rendimiento esperado de un activo basado en su riesgo sistemático (Beta) frente al mercado.")
+
+    if st.button("🔄 Calcular CAPM", key="btn_m4"):
+        with st.spinner("Consultando FRED y calculando métricas en el servidor..."):
+            
+            # 1. Obtenemos la tasa real de FRED primero
+            rf_real = 0.04 # Fallback por si FRED no responde
+            try:
+                curva = api_get("/renta-fija/curva")
+                if curva and "datos_mercado" in curva and "tasas" in curva["datos_mercado"]:
+                    rf_real = curva["datos_mercado"]["tasas"][0] / 100
+            except:
+                pass
+
+            # 2. Le pasamos la tasa real al backend en los parámetros
+            params_capm = {
+                "tickers": tickers, 
+                "benchmark": benchmark,
+                "tasa_libre_riesgo": rf_real
+            }
+            data_capm = api_get("/analisis/capm", params=params_capm)
+
+        if data_capm and "activos" in data_capm:
+            rf_val = data_capm['activos'][0]['tasa_libre_riesgo_anual']
+            st.success(f"✅ Tasa Libre de Riesgo (FRED): **{rf_val * 100:.2f}%** | Benchmark: **{data_capm['benchmark']}**")
+
+            df_capm = pd.DataFrame(data_capm["activos"])
+
+            # ── Métricas visuales por activo ──
+            cols = st.columns(len(df_capm))
+            for i, (_, row) in enumerate(df_capm.iterrows()):
+                color = "🔴" if row["clasificacion"] == "Agresivo" else "🟢" if row["clasificacion"] == "Defensivo" else "🟡"
+                cols[i].metric(
+                    f"{color} {row['ticker']}", f"β = {row['beta']:.3f}",
+                    delta=row["clasificacion"], delta_color="off"
+                )
+
+            st.divider()
+
+            # ── Tabla resumen detallada ──
+            df_display = df_capm[[
+                "ticker", "beta", "clasificacion", "rendimiento_esperado_capm", 
+                "prima_riesgo", "alpha_jensen", "r_cuadrado"
+            ]].copy()
+            
+            df_display["rendimiento_esperado_capm"] *= 100
+            df_display["prima_riesgo"] *= 100
+            df_display["alpha_jensen"] *= 100
+            
+            df_display.columns = ["Ticker", "Beta (β)", "Clasificación", "E(R) CAPM %", "Prima Riesgo %", "α Jensen %", "R² (Sistemático)"]
+            
+            st.dataframe(
+                df_display.set_index("Ticker").style.format({
+                    "Beta (β)": "{:.4f}", "E(R) CAPM %": "{:.2f}%", 
+                    "Prima Riesgo %": "{:.2f}%", "α Jensen %": "{:.2f}%", "R² (Sistemático)": "{:.4f}"
+                }), 
+                use_container_width=True
+            )
+
+            # ── Gráficos (Libres de la variable COLORS) ──
+            col_g1, col_g2 = st.columns(2)
+
+            with col_g1:
+                fig_beta = go.Figure()
+                # Usamos códigos Hexadecimales puros para evitar el NameError
+                bar_colors = ["#ef4444" if b > 1.2 else "#10b981" if b < 0.8 else "#f59e0b" for b in df_capm["beta"]]
+                
+                fig_beta.add_trace(go.Bar(
+                    x=df_capm["ticker"], y=df_capm["beta"],
+                    marker_color=bar_colors, text=df_capm["beta"].round(3), textposition="auto"
+                ))
+                fig_beta.add_hline(y=1.0, line_dash="dash", line_color="#94a3b8", annotation_text="Mercado (β=1)")
+                
+                try: fig_beta.update_layout(**plotly_layout("Beta por activo", height=400))
+                except: fig_beta.update_layout(title="Beta por activo", height=400, template="plotly_dark")
+                st.plotly_chart(fig_beta, use_container_width=True)
+
+            with col_g2:
+                rf = df_capm.iloc[0]["tasa_libre_riesgo_anual"]
+                rm = df_capm.iloc[0]["rendimiento_mercado_anual"]
+                betas_sml = np.linspace(0, max(2.0, df_capm["beta"].max() * 1.2), 100)
+                rend_sml = (rf + betas_sml * (rm - rf)) * 100
+
+                fig_sml = go.Figure()
+                fig_sml.add_trace(go.Scatter(
+                    x=betas_sml, y=rend_sml, name="SML (Teórica)",
+                    line=dict(color="#3b82f6", width=2, dash="dash"),
+                ))
+                
+                for _, row in df_capm.iterrows():
+                    fig_sml.add_trace(go.Scatter(
+                        x=[row["beta"]], y=[row["rendimiento_esperado_capm"] * 100],
+                        mode="markers+text", text=[row["ticker"]], textposition="top right",
+                        marker=dict(size=12, color="#f43f5e"), showlegend=False
+                    ))
+                
+                try: fig_sml.update_layout(**plotly_layout("Security Market Line (SML)", height=400, xaxis_title="Beta (β)", yaxis_title="E(R) %"))
+                except: fig_sml.update_layout(title="Security Market Line", height=400, template="plotly_dark")
+                st.plotly_chart(fig_sml, use_container_width=True)
+
+            with st.expander("ℹ️ Guía de interpretación CAPM"):
+                st.markdown("""
+                - **Beta (β) > 1.2 (Agresivo):** El activo amplifica los movimientos del mercado. Mayor riesgo, pero mayor retorno esperado.
+                - **Beta (β) < 0.8 (Defensivo):** El activo es menos volátil que el mercado. Ideal para proteger capital en tendencias bajistas.
+                - **Alpha de Jensen (α):** Si es positivo, el activo superó el rendimiento teórico ajustado por riesgo. Indica "generación de valor".
+                - **R² (R-Cuadrado):** Indica qué tanto del movimiento del activo se explica por el mercado. Un R² alto significa que el riesgo es mayoritariamente **sistemático**.
+                """)
+        else:
+            st.error("⚠️ No se pudo obtener la información del CAPM. Verifica el backend.")
 
 
-# ═══════════════════ MÓD 5 — VaR ═══════════════════
+# ═══════════════════ TAB 5 — VALOR EN RIESGO (VaR) Y CVAR ═══════════════════
 
 with tabs[5]:
-    st.subheader("🛡️ Value at Risk y CVaR")
-    ticker_v = st.selectbox("Activo", tickers, key="m5_ticker")
+    st.subheader("🛡️ Gestión de Riesgo — VaR y CVaR")
+    st.info("""
+        El **Value at Risk (VaR)** mide la pérdida máxima potencial en un horizonte de 1 día con un nivel de confianza determinado. 
+        El **CVaR (Expected Shortfall)** mide la pérdida promedio en caso de que se supere el VaR.
+    """)
 
-    with st.spinner("Calculando VaR..."):
-        data_v = api_get(f"/analisis/var/{ticker_v}")
+    # Selección de activo y configuración
+    col_v1, col_v2 = st.columns([2, 1])
+    with col_v1:
+        ticker_v = st.selectbox("Seleccione el activo para el análisis de riesgo", tickers, key="m5_ticker")
+    with col_v2:
+        st.write(f"**Confianza:** {confianza_var:.0%} | **Capital:** ${valor_portafolio:,.0f}")
 
-    if data_v:
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("VaR Paramétrico", f"{data_v['var_parametrico']:.6f}",
-                  delta=f"-${abs(data_v['var_parametrico'])*valor_portafolio:,.0f}")
-        c2.metric("VaR Histórico", f"{data_v['var_historico']:.6f}",
-                  delta=f"-${abs(data_v['var_historico'])*valor_portafolio:,.0f}")
-        c3.metric("VaR Monte Carlo", f"{data_v['var_montecarlo']:.6f}",
-                  delta=f"-${abs(data_v['var_montecarlo'])*valor_portafolio:,.0f}")
-        c4.metric("CVaR", f"{data_v['cvar']:.6f}",
-                  delta=f"-${abs(data_v['cvar'])*valor_portafolio:,.0f}")
+    if st.button("🔄 Ejecutar Análisis de Riesgo", key="btn_var_run"):
+        with st.spinner(f"Calculando métricas de riesgo para {ticker_v}..."):
+            safe_ticker = urllib.parse.quote(ticker_v, safe='')
+            
+            # 1. Obtenemos datos de VaR y de Rendimientos (para normalidad)
+            data_v = api_get(f"/analisis/var/{safe_ticker}")
+            data_r = api_get(f"/analisis/rendimientos/{safe_ticker}")
 
-        fig = go.Figure()
-        nombres = ["Paramétrico", "Histórico", "Monte Carlo", "CVaR"]
-        valores = [data_v["var_parametrico"], data_v["var_historico"], data_v["var_montecarlo"], data_v["cvar"]]
-        fig.add_trace(go.Bar(x=nombres, y=valores, marker_color=["#636EFA", "#EF553B", "#00CC96", "#AB63FA"]))
-        fig.update_layout(title=f"VaR — {ticker_v} (conf. {confianza_var:.0%})", yaxis_title="Pérdida diaria", height=350)
-        st.plotly_chart(fig, use_container_width=True)
+        if data_v and data_r:
+            # Determinamos el método recomendado basado en la normalidad de Jarque-Bera
+            es_normal = data_r["jarque_bera"]["es_normal"]
+            metodo_rec = "Paramétrico" if es_normal else "Histórico / Monte Carlo"
+            
+            st.success(f"Análisis completado para {ticker_v}. Método recomendado: **{metodo_rec.upper()}**")
+            if not es_normal:
+                st.warning("⚠️ Los rendimientos no son normales. El VaR Paramétrico podría estar subestimando el riesgo de cola.")
 
-        with st.expander("ℹ️ Interpretación"):
-            st.markdown(f"""
-            Con **${valor_portafolio:,.0f}** al **{confianza_var:.0%}** de confianza:
-            - **VaR Paramétrico:** peor pérdida diaria ≈ **${abs(data_v['var_parametrico'])*valor_portafolio:,.0f}**
-            - **CVaR:** si se supera el VaR, pérdida promedio ≈ **${abs(data_v['cvar'])*valor_portafolio:,.0f}**
-            """)
+            # ── 1. Métricas Principales (Con impacto monetario) ──
+            c1, c2, c3, c4 = st.columns(4)
+            
+            # Función auxiliar para mostrar métricas consistentes
+            def metric_var(label, val, cap):
+                perda_monetaria = abs(val) * cap
+                st.metric(label, f"{val*100:.4f}%", delta=f"-${perda_monetaria:,.0f}", delta_color="inverse")
 
+            with c1: metric_var("VaR Paramétrico", data_v['var_parametrico'], valor_portafolio)
+            with c2: metric_var("VaR Histórico", data_v['var_historico'], valor_portafolio)
+            with c3: metric_var("VaR Monte Carlo", data_v['var_montecarlo'], valor_portafolio)
+            with c4: metric_var("CVaR (Ex. Shortfall)", data_v['cvar'], valor_portafolio)
+
+            st.divider()
+
+            # ── 2. Tabla Comparativa y Gráfico ──
+            col_tab, col_fig = st.columns([1, 1.2])
+
+            with col_tab:
+                st.markdown("#### Resumen de Pérdidas Potenciales")
+                res_data = [
+                    {"Método": "Paramétrico", "VaR (%)": data_v['var_parametrico']*100, "VaR ($)": abs(data_v['var_parametrico'])*valor_portafolio},
+                    {"Método": "Histórico", "VaR (%)": data_v['var_historico']*100, "VaR ($)": abs(data_v['var_historico'])*valor_portafolio},
+                    {"Método": "Monte Carlo", "VaR (%)": data_v['var_montecarlo']*100, "VaR ($)": abs(data_v['var_montecarlo'])*valor_portafolio},
+                    {"Método": "CVaR (Tail)", "VaR (%)": data_v['cvar']*100, "VaR ($)": abs(data_v['cvar'])*valor_portafolio},
+                ]
+                df_res = pd.DataFrame(res_data)
+                st.table(df_res.set_index("Método").style.format({"VaR (%)": "{:.4f}%", "VaR ($)": "${:,.2f}"}))
+
+            with col_fig:
+                fig_v = go.Figure()
+                fig_v.add_trace(go.Bar(
+                    x=df_res["Método"], y=df_res["VaR (%)"],
+                    marker_color=["#818CF8", "#636EFA", "#00CC96", "#ED1E79"],
+                    text=df_res["VaR (%)"].round(4).astype(str) + "%",
+                    textposition='auto'
+                ))
+                try:
+                    fig_v.update_layout(**plotly_layout(f"Comparativa de Métodos (Confianza {confianza_var:.0%})", height=380, yaxis_title="% de pérdida diaria"))
+                except:
+                    fig_v.update_layout(title="Comparativa VaR", height=380, template="plotly_dark")
+                st.plotly_chart(fig_v, use_container_width=True)
+
+            # ── 3. Interpretaciones y Expanders ──
+            st.markdown("---")
+            exp_a, exp_b = st.columns(2)
+            
+            with exp_a:
+                with st.expander("📖 Interpretación de los resultados"):
+                    st.write(f"""
+                    Al nivel de confianza del **{confianza_var:.0%}**, existe solo un **{100 - confianza_var*100:.0f}%** de probabilidad 
+                    de que las pérdidas diarias de **{ticker_v}** superen los **${abs(data_v['var_historico'])*valor_portafolio:,.0f}** (según el método histórico).
+                    
+                    Si llegáramos a entrar en ese escenario extremo (el peor {100 - confianza_var*100:.0f}% de los días), 
+                    la pérdida promedio esperada sería de **${abs(data_v['cvar'])*valor_portafolio:,.0f}**.
+                    """)
+
+            with exp_b:
+                with st.expander("ℹ️ ¿Qué método es más confiable?"):
+                    st.markdown(f"""
+                    | Método | Cuándo usarlo |
+                    |---|---|
+                    | **Paramétrico** | Si los datos son **Normales** (Jarque-Bera p > 0.05). |
+                    | **Histórico** | Si hay **Colas Pesadas** o mucha asimetría. No asume normalidad. |
+                    | **Monte Carlo** | El más flexible para portafolios complejos o simulaciones futuras. |
+                    """)
+
+        else:
+            st.error("⚠️ Error al conectar con el endpoint de VaR. Por favor verifica que el backend esté activo.")
 
 # ═══════════════════ MÓD 6 — MARKOWITZ ═══════════════════
 
 with tabs[6]:
-    st.subheader("⚡ Optimización — Markowitz")
-    permitir_cortos = st.checkbox("Permitir ventas en corto", key="m6_cortos")
-    if st.button("🔄 Optimizar portafolio", key="btn_m6"):
-        with st.spinner("Optimizando..."):
+    st.subheader("⚡ Optimización de Markowitz — Frontera Eficiente")
+    
+    col_c1, col_c2 = st.columns(2)
+    with col_c1:
+        n_port = st.slider("Portafolios a simular (Fondo)", 1000, 30000, 5000, step=1000, key="m6_slider_n")
+    with col_c2:
+        # Aquí habilitamos el checkbox que envía la señal al backend y a la nube
+        permitir_cortos = st.checkbox("Permitir ventas en corto", key="m6_cortos")
+    
+    if st.button("🔄 Construir frontera eficiente", key="btn_markowitz"):
+        with st.spinner(f"Calculando línea matemática y simulando nube..."):
+            
+            # 1. Llamamos a TU BACKEND para obtener la línea y el óptimo exacto
             data_m = api_get("/analisis/markowitz", params={"permitir_cortos": permitir_cortos})
-        if data_m:
-            opt = data_m["optimizacion"]
-            c1, c2, c3 = st.columns(3)
-            c1.metric("Retorno Anual", f"{opt['retorno_anual']*100:.2f}%")
-            c2.metric("Riesgo Anual", f"{opt['riesgo_anual']*100:.2f}%")
-            c3.metric("Sharpe Ratio", f"{opt['sharpe_ratio']:.4f}")
+            
+            # 2. Descargamos precios para generar la nube de fondo y la matriz localmente
+            precios_dict = {}
+            for t in tickers:
+                safe_t = urllib.parse.quote(t, safe='')
+                p_data = api_get(f"/precios/{safe_t}")
+                if p_data and isinstance(p_data, list) and len(p_data) > 0:
+                    df_p = pd.DataFrame(p_data)
+                    df_p["fecha"] = pd.to_datetime(df_p["fecha"])
+                    precios_dict[t] = df_p.set_index("fecha")["close"]
 
-            col_a, col_b = st.columns(2)
-            with col_a:
-                fig_p = px.pie(names=list(opt["pesos"].keys()), values=list(opt["pesos"].values()), title="Pesos Óptimos")
-                st.plotly_chart(fig_p, use_container_width=True)
-            with col_b:
-                frontera = pd.DataFrame(data_m["frontera"])
+            if len(precios_dict) < 2:
+                st.error("⚠️ Se necesitan al menos 2 activos con historial de precios para simular.")
+            elif data_m and "optimizacion" in data_m:
+                opt = data_m["optimizacion"]
+                frontera = pd.DataFrame(data_m.get("frontera", []))
+                
+                # Extraer tasa FRED localmente para el Sharpe de la nube
+                rf_anual = 0.04
+                try:
+                    curva = api_get("/renta-fija/curva")
+                    if curva and "datos_mercado" in curva:
+                        rf_anual = curva["datos_mercado"]["tasas"][0] / 100
+                except: pass
+
+                st.success(f"✅ Optimización analítica completada. Rf usada: **{rf_anual * 100:.2f}%**")
+
+                # 3. Preparar datos de rendimiento
+                df_precios = pd.DataFrame(precios_dict)
+                df_ret = np.log(df_precios / df_precios.shift(1)).dropna()
+                
+                # ── Matriz de Correlación ──
+                st.markdown("#### 🔗 Matriz de correlación entre activos")
+                corr_df = df_ret.corr()
+                fig_corr = go.Figure(data=go.Heatmap(
+                    z=corr_df.values, x=corr_df.columns.tolist(), y=corr_df.index.tolist(),
+                    colorscale="RdBu", zmin=-1, zmax=1,
+                    text=corr_df.round(2).values, texttemplate="%{text}", textfont={"size": 11},
+                    colorbar=dict(title="Correlación"),
+                ))
+                try: fig_corr.update_layout(**plotly_layout("Correlación de rendimientos", height=350))
+                except: fig_corr.update_layout(title="Correlación", height=350, template="plotly_dark")
+                st.plotly_chart(fig_corr, use_container_width=True)
+                st.divider()
+
+                # 4. SIMULACIÓN DE MONTE CARLO (Solo para pintar la nube visual)
+                mean_returns = df_ret.mean() * 252
+                cov_matrix = df_ret.cov() * 252
+                num_activos = len(tickers)
+                
+                resultados_sim = np.zeros((3, n_port))
+                
+                for i in range(n_port):
+                    # Lógica para permitir o no ventas en corto en la nube
+                    if permitir_cortos:
+                        pesos = np.random.uniform(-1, 1.5, num_activos)
+                        # Evitar divisiones por cero o apalancamientos locos
+                        while abs(np.sum(pesos)) < 0.1:
+                            pesos = np.random.uniform(-1, 1.5, num_activos)
+                    else:
+                        pesos = np.random.random(num_activos)
+                        
+                    pesos /= np.sum(pesos)
+                    
+                    retorno_port = np.sum(mean_returns * pesos)
+                    std_port = np.sqrt(np.dot(pesos.T, np.dot(cov_matrix, pesos)))
+                    sharpe_port = (retorno_port - rf_anual) / std_port
+                    
+                    resultados_sim[0, i] = std_port
+                    resultados_sim[1, i] = retorno_port
+                    resultados_sim[2, i] = sharpe_port
+
+                # 5. GRÁFICO INTEGRADO (Nube + Línea + Puntos exactos)
+                st.markdown("#### 📈 Frontera Eficiente y Conjunto Factible")
+                fig_mk = go.Figure()
+
+                # A. La nube generada aleatoriamente
+                fig_mk.add_trace(go.Scatter(
+                    x=resultados_sim[0] * 100, y=resultados_sim[1] * 100,
+                    mode="markers", name="Simulación",
+                    marker=dict(
+                        color=resultados_sim[2], colorscale="Plasma", 
+                        size=4, opacity=0.4, colorbar=dict(title="Sharpe"),
+                    ),
+                    hovertemplate="Riesgo: %{x:.2f}%<br>Retorno: %{y:.2f}%<br>Sharpe: %{marker.color:.4f}<extra></extra>"
+                ))
+
+                # B. La Línea Exacta (Calculada por tu backend)
                 if not frontera.empty:
-                    fig_f = px.scatter(frontera, x="riesgo", y="retorno", title="Frontera Eficiente")
-                    fig_f.add_scatter(x=[opt["riesgo_anual"]], y=[opt["retorno_anual"]],
-                                      mode="markers", marker=dict(size=14, color="red", symbol="star"), name="Óptimo")
-                    st.plotly_chart(fig_f, use_container_width=True)
+                    frontera_sorted = frontera.sort_values("riesgo")
+                    fig_mk.add_trace(go.Scatter(
+                        x=frontera_sorted["riesgo"] * 100,
+                        y=frontera_sorted["retorno"] * 100,
+                        mode="lines", name="Frontera Analítica",
+                        line=dict(color="#ED1E79", width=4),
+                    ))
+                    
+                    # Extraemos Mínima Varianza directo de la línea
+                    min_var_row = frontera_sorted.iloc[0]
+                    fig_mk.add_trace(go.Scatter(
+                        x=[min_var_row["riesgo"] * 100], y=[min_var_row["retorno"] * 100],
+                        mode="markers+text", name="Mín. Varianza 🔵",
+                        text=["Mín. Varianza"], textposition="bottom right",
+                        marker=dict(color="#38BDF8", size=12, symbol="diamond", line=dict(color="white", width=1)),
+                    ))
 
-            st.markdown("#### 💰 Distribución de la inversión")
-            for t, w in opt["pesos"].items():
-                st.write(f"**{t}:** {w*100:.1f}% → **${w*valor_portafolio:,.0f}**")
+                # C. El Óptimo Exacto (Calculado por tu backend)
+                ms_retorno = opt["retorno_anual"]
+                ms_riesgo = opt["riesgo_anual"]
+                ms_sharpe = opt["sharpe_ratio"]
+                
+                fig_mk.add_trace(go.Scatter(
+                    x=[ms_riesgo * 100], y=[ms_retorno * 100],
+                    mode="markers+text", name="Máx. Sharpe ⭐",
+                    text=["Máx. Sharpe"], textposition="top left",
+                    marker=dict(color="gold", size=17, symbol="star", line=dict(color="black", width=1)),
+                ))
 
+                try:
+                    fig_mk.update_layout(**plotly_layout(
+                        "Modelo de Markowitz", height=550,
+                        xaxis_title="Volatilidad anualizada (%)", yaxis_title="Rendimiento esperado (%)"
+                    ))
+                except:
+                    fig_mk.update_layout(title="Frontera de Markowitz", height=550, template="plotly_dark")
+                st.plotly_chart(fig_mk, use_container_width=True)
 
-# ═══════════════════ MÓD 7 — SEÑALES ═══════════════════
+                # 6. MÉTRICAS FINALES
+                col_ms, col_mv = st.columns(2)
+
+                with col_ms:
+                    st.markdown("#### ⭐ Portafolio Máximo Sharpe")
+                    st.metric("Retorno | Riesgo", f"{ms_retorno*100:.2f}% | {ms_riesgo*100:.2f}%")
+                    st.metric("Sharpe Ratio", f"{ms_sharpe:.4f}")
+                    df_ms = pd.DataFrame(list(opt["pesos"].items()), columns=["Ticker", "Peso"])
+                    fig_pie_ms = px.pie(df_ms, values="Peso", names="Ticker", hole=0.3)
+                    try: fig_pie_ms.update_layout(**plotly_layout(height=320))
+                    except: fig_pie_ms.update_layout(height=320, template="plotly_dark")
+                    st.plotly_chart(fig_pie_ms, use_container_width=True)
+
+                with col_mv:
+                    st.markdown("#### 💰 Distribución de la inversión (Máx. Sharpe)")
+                    st.info("Valores calculados analíticamente.")
+                    for t, w in opt["pesos"].items():
+                        # Si es venta en corto, el peso es negativo
+                        signo = "" if w >= 0 else "🔴 Corto "
+                        st.write(f"**{t}:** {w*100:.1f}% → **{signo}${w*valor_portafolio:,.0f}**")
+                        
+            else:
+                st.error("⚠️ El backend no logró calcular la frontera eficiente. Verifica los logs de FastAPI.")
+
+# ═══════════════════ TAB 7 — SEÑALES Y SEMÁFOROS ═══════════════════
 
 with tabs[7]:
-    st.subheader("🚦 Señales de Trading — Todos los activos")
+    st.subheader("🚦 Semáforo de Trading — Análisis Técnico")
+    
+    # 1. INYECCIÓN DE CSS PARA LAS TARJETAS DE SEÑAL
+    st.markdown("""
+        <style>
+        .semaforo-verde {
+            background-color: rgba(16,185,129,0.12);
+            border: 1px solid #10b981;
+            padding: 15px; border-radius: 10px; color: #ffffff !important;
+        }
+        .semaforo-rojo {
+            background-color: rgba(239,68,68,0.12);
+            border: 1px solid #ef4444;
+            padding: 15px; border-radius: 10px; color: #ffffff !important;
+        }
+        .semaforo-amarillo {
+            background-color: #fef08a;
+            border: 1px solid #facc15;
+            padding: 15px; border-radius: 10px; color: #1a1a1a !important;
+        }
+        .semaforo-title {
+            font-weight: 800; font-size: 18px; margin-bottom: 8px; display: block;
+        }
+        .semaforo-desc {
+            font-size: 13px; line-height: 1.4; display: block;
+        }
+        </style>
+    """, unsafe_allow_html=True)
+
+    # Función auxiliar para emojis en la tabla
+    def get_emoji_senal(s):
+        if "COMPRA" in s: return "🟢"
+        if "VENTA" in s: return "🔴"
+        return "🟡"
 
     for t in tickers:
-        data_s = api_get(f"/analisis/indicadores/{t}")
-        if data_s:
+        # Llamada al backend actual
+        safe_t = urllib.parse.quote(t, safe='')
+        data_s = api_get(f"/analisis/indicadores/{safe_t}")
+        
+        if data_s and "indicadores" in data_s:
+            # Convertimos a DataFrame y tomamos el último registro
             df_s = pd.DataFrame(data_s["indicadores"]).T
-            if len(df_s) == 0:
-                continue
+            if df_s.empty: continue
+            
             ultimo = df_s.iloc[-1]
-            señales = []
+            precio_act = ultimo.get("close", 0)
+            
+            # 2. LÓGICA DE GENERACIÓN DE SEÑALES (Basada en tus indicadores actuales)
+            señales_detalle = []
+            
+            # RSI
+            rsi_val = ultimo["rsi"]
+            if rsi_val > 70: s_rsi = ("RSI", "🔴 VENTA", f"Sobrecompra ({rsi_val:.1f})")
+            elif rsi_val < 30: s_rsi = ("RSI", "🟢 COMPRA", f"Sobreventa ({rsi_val:.1f})")
+            else: s_rsi = ("RSI", "🟡 NEUTRAL", f"RSI normal ({rsi_val:.1f})")
+            señales_detalle.append(s_rsi)
 
-            if ultimo["rsi"] > 70: señales.append(("RSI", "🔴 VENTA", f"RSI={ultimo['rsi']:.1f}"))
-            elif ultimo["rsi"] < 30: señales.append(("RSI", "🟢 COMPRA", f"RSI={ultimo['rsi']:.1f}"))
-            else: señales.append(("RSI", "🟡 NEUTRAL", f"RSI={ultimo['rsi']:.1f}"))
+            # BOLLINGER
+            close = ultimo["close"]
+            if close > ultimo["bollinger_upper"]: s_bb = ("Bollinger", "🔴 VENTA", "Precio sobre banda superior")
+            elif close < ultimo["bollinger_lower"]: s_bb = ("Bollinger", "🟢 COMPRA", "Precio bajo banda inferior")
+            else: s_bb = ("Bollinger", "🟡 NEUTRAL", "Dentro de bandas")
+            señales_detalle.append(s_bb)
 
-            if ultimo["close"] > ultimo["bollinger_upper"]: señales.append(("Bollinger", "🔴 VENTA", "Sobre banda sup"))
-            elif ultimo["close"] < ultimo["bollinger_lower"]: señales.append(("Bollinger", "🟢 COMPRA", "Bajo banda inf"))
-            else: señales.append(("Bollinger", "🟡 NEUTRAL", "Dentro de bandas"))
+            # MACD
+            if ultimo["macd"] > ultimo["macd_signal"]: s_macd = ("MACD", "🟢 COMPRA", "Cruce alcista (MACD > Señal)")
+            else: s_macd = ("MACD", "🔴 VENTA", "Cruce bajista (MACD < Señal)")
+            señales_detalle.append(s_macd)
 
-            if ultimo["macd"] > ultimo["macd_signal"]: señales.append(("MACD", "🟢 COMPRA", "MACD > señal"))
-            else: señales.append(("MACD", "🔴 VENTA", "MACD < señal"))
+            # ESTOCÁSTICO
+            stoch = ultimo["stochastic_k"]
+            if stoch > 80: s_st = ("Estocástico", "🔴 VENTA", f"Zona de techo ({stoch:.1f})")
+            elif stoch < 20: s_st = ("Estocástico", "🟢 COMPRA", f"Zona de suelo ({stoch:.1f})")
+            else: s_st = ("Estocástico", "🟡 NEUTRAL", f"Neutral ({stoch:.1f})")
+            señales_detalle.append(s_st)
 
-            if ultimo["stochastic_k"] > 80: señales.append(("Estocástico", "🔴 VENTA", f"%K={ultimo['stochastic_k']:.1f}"))
-            elif ultimo["stochastic_k"] < 20: señales.append(("Estocástico", "🟢 COMPRA", f"%K={ultimo['stochastic_k']:.1f}"))
-            else: señales.append(("Estocástico", "🟡 NEUTRAL", f"%K={ultimo['stochastic_k']:.1f}"))
+            # 3. CÁLCULO DEL SEMÁFORO GLOBAL
+            compras = sum(1 for s in señales_detalle if "COMPRA" in s[1])
+            ventas = sum(1 for s in señales_detalle if "VENTA" in s[1])
+            
+            if compras >= 3:
+                status, css, emoji, desc = "VERDE - COMPRA FUERTE", "semaforo-verde", "🟢", "La mayoría de indicadores técnicos sugieren una entrada alcista con alta probabilidad."
+            elif ventas >= 3:
+                status, css, emoji, desc = "ROJO - VENTA FUERTE", "semaforo-rojo", "🔴", "Múltiples señales de agotamiento detectadas. Se recomienda precaución o toma de beneficios."
+            elif compras == 2:
+                status, css, emoji, desc = "AMARILLO - COMPRA DÉBIL", "semaforo-amarillo", "🟡", "Existen señales mixtas con sesgo alcista. Se recomienda esperar confirmación adicional."
+            elif ventas == 2:
+                status, css, emoji, desc = "AMARILLO - VENTA DÉBIL", "semaforo-amarillo", "🟡", "Presión bajista leve detectada. Posible consolidación de precios."
+            else:
+                status, css, emoji, desc = "AMARILLO - NEUTRAL", "semaforo-amarillo", "🟡", "El activo se encuentra en una fase lateral sin tendencia clara según los indicadores."
 
-            compras = sum(1 for s in señales if "COMPRA" in s[1])
-            ventas = sum(1 for s in señales if "VENTA" in s[1])
-            if compras > ventas: emoji, resumen = "🟢", "COMPRA"
-            elif ventas > compras: emoji, resumen = "🔴", "VENTA"
-            else: emoji, resumen = "🟡", "NEUTRAL"
+            # 4. DESPLIEGUE VISUAL (El diseño del proyecto anterior)
+            st.markdown(f"### {emoji} {t} — ${precio_act:,.2f}")
+            
+            c1, c2, c3, c4 = st.columns([2, 1, 1, 1])
+            with c1:
+                st.markdown(
+                    f'<div class="{css}">'
+                    f'<span class="semaforo-title">{status}</span>'
+                    f'<span class="semaforo-desc">{desc}</span>'
+                    f'</div>',
+                    unsafe_allow_html=True
+                )
+            
+            c2.metric("🟢 Compra", compras)
+            c3.metric("🔴 Venta", ventas)
+            c4.metric("🟡 Neutral", 4 - (compras + ventas))
 
-            st.markdown(f"### {emoji} {t} — {resumen}")
-            df_sen = pd.DataFrame(señales, columns=["Indicador", "Señal", "Detalle"])
-            st.dataframe(df_sen.set_index("Indicador"), use_container_width=True)
+            # Tabla detallada con los indicadores
+            df_final = pd.DataFrame(señales_detalle, columns=["Indicador", "Señal", "Detalle"])
+            st.dataframe(df_final.set_index("Indicador"), use_container_width=True)
             st.divider()
 
 
 # ═══════════════════ MÓD 8 — MACRO ═══════════════════
 
+# ═══════════════════ TAB 8 — CONTEXTO MACRO Y BENCHMARK ═══════════════════
+
 with tabs[8]:
-    st.subheader("🌐 Contexto Macroeconómico")
-    if st.button("🔄 Cargar datos FRED", key="btn_m8"):
-        with st.spinner("Consultando FRED..."):
-            data_c = api_get("/renta-fija/curva")
-        if data_c:
-            datos = data_c["datos_mercado"]
-            df_curva = pd.DataFrame({"Plazo (años)": datos["plazos"], "Tasa (%)": datos["tasas"]})
-            fig = px.line(df_curva, x="Plazo (años)", y="Tasa (%)",
-                          title="Curva de Rendimiento USA (FRED)", markers=True)
-            st.plotly_chart(fig, use_container_width=True)
-            st.dataframe(df_curva, use_container_width=True)
-            with st.expander("ℹ️ Interpretación"):
+    st.subheader("🌐 Contexto Macroeconómico y Benchmark")
+    
+    # Botón unificado
+    if st.button("🔄 Cargar Análisis Macro y Comparativa", key="btn_macro_bench"):
+        with st.spinner("Consultando FRED y calculando métricas de gestión activa..."):
+            
+            # 1. PARTE MACRO: Curva de Rendimiento (USA FRED)
+            data_curva = api_get("/renta-fija/curva")
+            
+            # 2. PARTE BENCHMARK: Obtenemos precios para calcular métricas de gestión
+            precios_bench = api_get(f"/precios/{urllib.parse.quote(benchmark, safe='')}")
+            precios_portafolio = {}
+            for t in tickers:
+                p_t = api_get(f"/precios/{urllib.parse.quote(t, safe='')}")
+                if p_t:
+                    df_t = pd.DataFrame(p_t)
+                    df_t["fecha"] = pd.to_datetime(df_t["fecha"])
+                    precios_portafolio[t] = df_t.set_index("fecha")["close"]
+
+        # ─── SECCIÓN A: CURVA DE RENDIMIENTO ──────────────────────────────────
+        if data_curva:
+            st.markdown("#### 📊 Curva de Rendimiento USA (FRED)")
+            datos = data_curva["datos_mercado"]
+            df_curva = pd.DataFrame({
+                "Plazo (años)": datos["plazos"], 
+                "Tasa (%)": datos["tasas"]
+            })
+            
+            fig_c = go.Figure()
+            fig_c.add_trace(go.Scatter(
+                x=df_curva["Plazo (años)"], y=df_curva["Tasa (%)"],
+                mode="lines+markers", name="Treasury Yield Curve",
+                line=dict(color="#38BDF8", width=3),
+                marker=dict(size=8, symbol="diamond")
+            ))
+            
+            try:
+                fig_c.update_layout(**plotly_layout("Estructura Temporal de Tasas de Interés", height=350))
+            except:
+                fig_c.update_layout(title="Curva de Rendimiento", height=350, template="plotly_dark")
+            
+            st.plotly_chart(fig_c, use_container_width=True)
+
+            with st.expander("ℹ️ Interpretación de la Pendiente"):
                 st.markdown("""
-                - **Pendiente positiva:** economía estable
-                - **Invertida:** señal de recesión
-                - **Plana:** incertidumbre
+                - **Pendiente Positiva:** Escenario normal. Las tasas largas son mayores que las cortas (expectativa de crecimiento).
+                - **Invertida (2Y vs 10Y):** Históricamente, una señal de **recesión inminente**.
+                - **Plana:** Transición e incertidumbre sobre la política monetaria.
                 """)
 
+        st.divider()
+
+        # ─── SECCIÓN B: MÉTRICAS VS BENCHMARK ────────────────────────────────
+        if precios_bench and precios_portafolio:
+            st.markdown(f"#### 📈 Desempeño del Portafolio vs {benchmark}")
+            
+            # Cálculo de rendimientos acumulados y métricas
+            df_b = pd.DataFrame(precios_bench)
+            df_b["fecha"] = pd.to_datetime(df_b["fecha"])
+            df_b.set_index("fecha", inplace=True)
+            ret_b = df_b["close"].pct_change().dropna()
+            
+            # Rendimiento del portafolio (Equiponderado por defecto)
+            df_all_p = pd.DataFrame(precios_portafolio).pct_change().dropna()
+            ret_p = df_all_p.mean(axis=1) # Promedio de rendimientos (IGUAL PESO)
+            
+            # Alinear series
+            df_comp = pd.merge(ret_p.rename("port"), ret_b.rename("bench"), left_index=True, right_index=True)
+            
+            # Cálculos de Gestión Activa
+            cum_p = (1 + df_comp["port"]).prod() - 1
+            cum_b = (1 + df_comp["bench"]).prod() - 1
+            exceso = df_comp["port"] - df_comp["bench"]
+            tracking_error = exceso.std() * np.sqrt(252)
+            alpha_jensen = (cum_p - cum_b) * 100 # Simplificado para visualización
+            info_ratio = exceso.mean() / exceso.std() if exceso.std() != 0 else 0
+            
+            # Drawdowns
+            def get_mdd(returns):
+                cum = (1 + returns).cumprod()
+                peak = cum.cummax()
+                dd = (cum - peak) / peak
+                return dd.min() * 100
+
+            mdd_p = get_mdd(df_comp["port"])
+            mdd_b = get_mdd(df_comp["bench"])
+
+            # UI de Alerta
+            if cum_p > cum_b:
+                st.success(f"✅ El portafolio **supera** al benchmark en rendimiento acumulado ({cum_p*100:.2f}% > {cum_b*100:.2f}%)")
+            else:
+                st.warning(f"⚠️ El portafolio **no supera** al benchmark ({cum_p*100:.2f}% < {cum_b*100:.2f}%)")
+
+            # Grid de Métricas (Igual al proyecto anterior)
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Rend. Acum. Port.", f"{cum_p*100:.2f}%")
+            c2.metric("Rend. Acum. Bench.", f"{cum_b*100:.2f}%")
+            c3.metric("Alpha Estimado", f"{alpha_jensen:.4f}%", 
+                      delta="Positivo ✅" if alpha_jensen > 0 else "Negativo ⚠️",
+                      delta_color="normal" if alpha_jensen > 0 else "inverse")
+            c4.metric("Information Ratio", f"{info_ratio:.4f}", help="Eficiencia del gestor activo.")
+
+            c5, c6, c7, c8 = st.columns(4)
+            c5.metric("Tracking Error", f"{tracking_error*100:.4f}%", help="Volatilidad del exceso de retorno.")
+            c6.metric("Max Drawdown Port.", f"{mdd_p:.2f}%")
+            c7.metric("Max Drawdown Bench.", f"{mdd_b:.2f}%")
+            c8.metric("Correlación P vs B", f"{df_comp['port'].corr(df_comp['bench']):.4f}")
+
+            with st.expander("ℹ️ Diccionario de Métricas de Gestión"):
+                st.markdown("""
+                - **Alpha:** El valor añadido por la selección de activos. Si es positivo, ganaste más de lo que el benchmark justifica.
+                - **Tracking Error:** Mide la "distancia" de tus movimientos vs el mercado. Un TE alto indica una gestión muy activa y diferente al índice.
+                - **Information Ratio:** Alpha dividido por Tracking Error. Mide si el riesgo extra que tomaste comparado con el benchmark valió la pena.
+                - **Max Drawdown:** La mayor caída "pico a valle". Es la prueba de fuego de la tolerancia al riesgo.
+                """)
 
 # ═══════════════════ MÓD 9 — RENTA FIJA ═══════════════════
 
 with tabs[9]:
     st.subheader("📐 Renta Fija — Duración y Convexidad")
-    c1, c2 = st.columns(2)
-    tasa_cupon = c1.number_input("Tasa Cupón", value=0.05, step=0.01, format="%.2f")
-    vencimiento = c2.number_input("Vencimiento (años)", value=10, min_value=1, max_value=30)
-    if st.button("🔄 Calcular", key="btn_m9"):
-        with st.spinner("Calculando..."):
+    
+    with st.container(border=True):
+        c1, c2, c3 = st.columns(3)
+        tasa_cupon = c1.number_input("Tasa Cupón (anual)", value=0.05, step=0.01, format="%.2f")
+        vencimiento = c2.number_input("Vencimiento (años)", value=10, min_value=1, max_value=30)
+        # Usamos la tasa de tu API Key de FRED
+        tasa_desc = c3.number_input("Tasa Descuento (YTM)", value=tasa_fred, format="%.4f", 
+                                   help="Tasa recuperada automáticamente de tu API de FRED")
+
+    if st.button("🔄 Calcular Sensibilidad", key="btn_m9"):
+        with st.spinner("Consultando métricas..."):
             data_rf = api_get("/renta-fija/duracion", params={"tasa_cupon": tasa_cupon, "vencimiento": vencimiento})
+        
         if data_rf:
             c1, c2, c3, c4 = st.columns(4)
-            c1.metric("Precio Bono", f"${data_rf['precio_bono']:.2f}")
-            c2.metric("Duración", f"{data_rf['duracion']:.4f} años")
+            c1.metric("Precio del Bono", f"${data_rf['precio_bono']:.2f}")
+            c2.metric("Duración Macaulay", f"{data_rf['duracion']:.2f} años")
             c3.metric("Convexidad", f"{data_rf['convexidad']:.4f}")
-            c4.metric("Tasa descuento", f"{data_rf['tasa_descuento']:.4%}")
+            
+            impacto_1pct = -data_rf['duracion'] * 0.01 * data_rf['precio_bono']
+            c4.metric("Efecto Δ 1% Tasa", f"{impacto_1pct:.2f}", delta="Pérdida estimada", delta_color="inverse")
+
+            st.divider()
+
+            # --- GRÁFICO CON NOMBRE Y COLORES NUEVOS ---
+            st.markdown("#### 📈 Análisis de Sensibilidad")
+            rango_yields = np.linspace(0.01, 0.20, 50)
+            
+            # Cálculo de la curva
+            precios_curva = data_rf['precio_bono'] * (
+                1 - data_rf['duracion'] * (rango_yields - tasa_desc) + 
+                0.5 * data_rf['convexidad'] * (rango_yields - tasa_desc)**2
+            )
+            
+            fig_rf = go.Figure()
+            
+            # Línea de la curva en AZUL CIELO (más visible que el blanco)
+            fig_rf.add_trace(go.Scatter(
+                x=rango_yields*100, y=precios_curva, 
+                name="Precio Estimado", 
+                line=dict(color="#38BDF8", width=4) 
+            ))
+            
+            # Línea de Tasa FRED en NARANJA
+            fig_rf.add_vline(
+                x=tasa_desc*100, 
+                line_dash="dash", 
+                line_color="#F97316", 
+                annotation_text=f" Tasa FRED: {tasa_desc*100:.2f}%",
+                annotation_position="top right"
+            )
+            
+            # CAMBIAMOS EL TÍTULO Y EL COLOR DEL TÍTULO
+            fig_rf.update_layout(
+                title={
+                    'text': "<b>Curva de Sensibilidad del Bono</b>",
+                    'y':0.9,
+                    'x':0,
+                    'xanchor': 'left',
+                    'yanchor': 'top',
+                    'font': {'size': 20, 'color': "#6DA9F3"} # Color gris azulado claro (muy visible)
+                },
+                xaxis_title="Tasa de Mercado (YTM %)",
+                yaxis_title="Precio del Bono ($)",
+                height=400,
+                template="plotly_dark", # Forzamos tema oscuro para que todo contraste
+                paper_bgcolor='rgba(0,0,0,0)',
+                plot_bgcolor='rgba(0,0,0,0)'
+            )
+            
+            st.plotly_chart(fig_rf, use_container_width=True)
 
 
 # ═══════════════════ MÓD 10 — OPCIONES ═══════════════════
 
 with tabs[10]:
-    st.subheader("🧮 Opciones — Black-Scholes")
+    st.subheader("🧮 Valuación de Opciones — Black-Scholes")
 
-    # Intentar traer tasa FRED
-    tasa_fred = 0.04
+    # 1. Aseguramos que la tasa fred exista (definición local por seguridad)
+    tasa_fred_local = 0.04 
     try:
-        curva = api_get("/renta-fija/curva")
-        if curva:
-            tasa_fred = curva["datos_mercado"]["tasas"][0] / 100
+        curva_opt = api_get("/renta-fija/curva")
+        if curva_opt and "datos_mercado" in curva_opt:
+            tasa_fred_local = list(curva_opt["datos_mercado"]["tasas"])[0] / 100
     except:
         pass
 
-    c1, c2, c3, c4, c5 = st.columns(5)
-    S = c1.number_input("Spot (S)", value=100.0, step=5.0)
-    K = c2.number_input("Strike (K)", value=100.0, step=5.0)
-    T = c3.number_input("Tiempo (T)", value=1.0, step=0.1)
-    r_opt = c4.number_input("Tasa (r)", value=round(tasa_fred, 4), step=0.01, format="%.4f",
-                             help=f"Tasa FRED actual: {tasa_fred:.4f}")
-    sigma = c5.number_input("Vol (σ)", value=0.20, step=0.05, format="%.2f")
+    with st.container(border=True):
+        c1, c2, c3, c4, c5 = st.columns(5)
+        S = c1.number_input("Precio Spot (S)", value=100.0, step=5.0)
+        K = c2.number_input("Strike (K)", value=100.0, step=5.0)
+        T = c3.number_input("Años (T)", value=1.0, step=0.1)
+        # Usamos la tasa detectada
+        r_opt = c4.number_input("Tasa (r)", value=tasa_fred_local, format="%.4f")
+        sigma = c5.number_input("Volatilidad (σ)", value=0.20, step=0.05)
 
-    if st.button("🔄 Calcular Black-Scholes", key="btn_m10"):
+    if st.button("🔄 Calcular Griegas y Precios", key="btn_m10"):
         with st.spinner("Calculando..."):
             data_bs = api_get("/opciones/black-scholes", params={"S": S, "K": K, "T": T, "r": r_opt, "sigma": sigma})
+        
         if data_bs:
-            col1, col2 = st.columns(2)
+            col1, col2 = st.columns([1, 1.5])
             with col1:
-                st.markdown("### 💲 Precios")
-                a, b = st.columns(2)
-                a.metric("Call", f"${data_bs['precios']['call']:.4f}")
-                b.metric("Put", f"${data_bs['precios']['put']:.4f}")
-            with col2:
-                st.markdown("### 📊 Greeks")
+                st.markdown("### 💲 Primas")
+                st.metric("Call Price", f"${data_bs['precios']['call']:.4f}")
+                st.metric("Put Price", f"${data_bs['precios']['put']:.4f}")
+                
+                st.markdown("### 📊 Griegas")
                 g = data_bs["greeks"]
-                a, b, c = st.columns(3)
-                a.metric("Delta Call", f"{g['delta_call']:.4f}")
-                a.metric("Delta Put", f"{g['delta_put']:.4f}")
-                b.metric("Gamma", f"{g['gamma']:.6f}")
-                b.metric("Vega", f"{g['vega']:.4f}")
-                c.metric("Theta", f"{g['theta_call']:.4f}")
-                c.metric("Rho", f"{g['rho_call']:.4f}")
+                ga, gb = st.columns(2)
+                ga.write(f"**Delta:** {g['delta_call']:.3f}")
+                ga.write(f"**Gamma:** {g['gamma']:.5f}")
+                gb.write(f"**Vega:** {g['vega']:.3f}")
+                gb.write(f"**Theta:** {g['theta_call']:.3f}")
 
+            # ── AQUÍ ESTÁ EL CAMBIO DE COLOR Y ESTÉTICA ──
+            with col2:
+                st.markdown("### 📈 Perfil de Beneficios")
+                st_range = np.linspace(S*0.5, S*1.5, 50)
+                payoff_call = np.maximum(st_range - K, 0) - data_bs['precios']['call']
+                payoff_put = np.maximum(K - st_range, 0) - data_bs['precios']['put']
+                
+                fig_opt = go.Figure()
+
+                # Call en Cian con Relleno
+                fig_opt.add_trace(go.Scatter(
+                    x=st_range, y=payoff_call, 
+                    name="Long Call", 
+                    line=dict(color="#00f2ff", width=3),
+                    fill='tozeroy', 
+                    fillcolor='rgba(0, 242, 255, 0.1)'
+                ))
+
+                # Put en Rosa con Relleno
+                fig_opt.add_trace(go.Scatter(
+                    x=st_range, y=payoff_put, 
+                    name="Long Put", 
+                    line=dict(color="#ED1E79", width=3),
+                    fill='tozeroy',
+                    fillcolor='rgba(237, 30, 121, 0.1)'
+                ))
+
+                # Línea de equilibrio
+                fig_opt.add_hline(y=0, line_color="#94a3b8", line_width=1, line_dash="dash")
+                
+                # --- SOLUCIÓN AL ERROR: Aplicamos el layout en dos pasos ---
+                
+                # Paso 1: Aplicamos el diseño base de tu función maestra
+                fig_opt.update_layout(
+                    **plotly_layout(
+                        "Perfil de Beneficios al Vencimiento", 
+                        height=400, 
+                        xaxis_title="Precio Activo Subyacente", 
+                        yaxis_title="Pérdida / Ganancia"
+                    )
+                )
+                
+                # Paso 2: Aplicamos los ajustes de color que querías sin repetir el nombre del parámetro
+                fig_opt.update_layout(
+                    title_font=dict(color='#CBD5E1', size=20), # Color de título mejorado
+                    xaxis=dict(title_font=dict(color='#94a3b8'), gridcolor="#334155"),
+                    yaxis=dict(title_font=dict(color='#94a3b8'), gridcolor="#334155")
+                )
+                
+                st.plotly_chart(fig_opt, use_container_width=True)
 
 # ═══════════════════ MÓD 11 — STRESS ═══════════════════
 
 with tabs[11]:
-    st.subheader("💥 Stress Testing")
-    if st.button("🔄 Ejecutar Stress Test", key="btn_m11"):
-        with st.spinner("Simulando..."):
-            data_st = api_get("/analisis/stress-test")
+    st.subheader("💥 Análisis de Escenarios Extremos (Stress Test)")
+    st.warning("Evaluación del impacto del portafolio ante eventos de 'Cisne Negro' históricos y catastróficos.")
+    
+    if st.button("🔄 Ejecutar Simulación de Crisis", key="btn_m11"):
+        data_st = api_get("/analisis/stress-test")
+        
         if data_st:
-            for esc in data_st["escenarios"]:
-                usd = esc["impacto_portafolio"] * valor_portafolio
-                if esc["impacto_portafolio"] < 0:
-                    st.error(f"🔴 **{esc['escenario']}** → {esc['impacto_portafolio']:.4f} (**-${abs(usd):,.0f}**)")
-                else:
-                    st.warning(f"🟡 **{esc['escenario']}** → {esc['impacto_portafolio']:.4f} (**${usd:,.0f}**)")
+            # 1. Gráfico de Impacto Global
             df_st = pd.DataFrame(data_st["escenarios"])
-            fig = px.bar(df_st, x="escenario", y="impacto_portafolio", color="tipo", title="Impacto por Escenario")
-            st.plotly_chart(fig, use_container_width=True)
+            df_st["Impacto USD"] = df_st["impacto_portafolio"] * valor_portafolio
+            
+            fig_st = px.bar(df_st, x="escenario", y="Impacto USD", color="impacto_portafolio",
+                           color_continuous_scale="RdYlGn", title="Impacto Monetario por Escenario")
+            st.plotly_chart(fig_st, use_container_width=True)
+
+            # 2. Tarjetas Detalladas
+            st.markdown("#### 🚨 Detalle de Supervivencia")
+            grid = st.columns(3)
+            for i, esc in enumerate(data_st["escenarios"]):
+                with grid[i % 3]:
+                    impacto_pct = esc["impacto_portafolio"] * 100
+                    impacto_usd = esc["impacto_portafolio"] * valor_portafolio
+                    
+                    # Estilo según gravedad
+                    bg_color = "rgba(239,68,68,0.1)" if impacto_pct < -5 else "rgba(245,158,11,0.1)"
+                    border_color = "#ef4444" if impacto_pct < -5 else "#f59e0b"
+                    
+                    st.markdown(f"""
+                        <div style="background:{bg_color}; border: 1px solid {border_color}; padding: 15px; border-radius: 10px;">
+                            <h4 style="margin:0; font-size:14px;">{esc['escenario']}</h4>
+                            <p style="font-size:24px; font-weight:bold; margin:5px 0;">{impacto_pct:.2f}%</p>
+                            <p style="margin:0; color:{border_color};">Impacto: -${abs(impacto_usd):,.0f}</p>
+                        </div>
+                    """, unsafe_allow_html=True)
+                    st.write("") # Espaciador
 
 
 # ═══════════════════ ML ═══════════════════
 
 with tabs[12]:
-    st.subheader("🤖 Machine Learning — Predicción")
-    col1, col2 = st.columns(2)
-    with col1:
-        st.markdown("### 🏋️ Entrenar")
-        ticker_ml = st.selectbox("Ticker", tickers if tickers else ["AAPL"], key="ml_t")
-        if st.button("Entrenar Random Forest", key="btn_ml_t"):
-            with st.spinner("Entrenando..."):
-                d = api_post(f"/ml/entrenar/{ticker_ml}")
-            if d: st.success(f"✅ Accuracy: {d['accuracy']:.4f}")
-    with col2:
-        st.markdown("### 🔮 Predecir")
-        ticker_p = st.selectbox("Ticker", tickers if tickers else ["AAPL"], key="ml_p")
-        if st.button("Predecir dirección", key="btn_ml_p"):
-            with st.spinner("Prediciendo..."):
+    st.subheader("🤖 Inteligencia Artificial — Predicción de Tendencia")
+    
+    with st.container(border=True):
+        col1, col2 = st.columns([1, 1.5])
+        
+        with col1:
+            st.markdown("### 🏋️ Entrenamiento")
+            ticker_ml = st.selectbox("Activo a entrenar", tickers, key="ml_t")
+            if st.button("Entrenar Modelo RF", key="btn_ml_t", use_container_width=True):
+                with st.spinner("Entrenando Random Forest..."):
+                    d = api_post(f"/ml/entrenar/{ticker_ml}")
+                if d: 
+                    st.success(f"Modelo Entrenado")
+                    st.metric("Precisión (Accuracy)", f"{d['accuracy']:.2%}")
+
+        with col2:
+            st.markdown("### 🔮 Predicción")
+            ticker_p = st.selectbox("Activo a predecir", tickers, key="ml_p")
+            if st.button("Ejecutar Predicción", key="btn_ml_p", use_container_width=True):
                 d = api_post(f"/ml/predecir/{ticker_p}")
-            if d:
-                emoji = "📈" if d["direccion"] == "sube" else "📉"
-                st.metric("Predicción", f"{emoji} {d['direccion'].upper()}")
-                st.metric("Probabilidad", f"{d['probabilidad']:.2%}")
+                if d:
+                    prob = d['probabilidad']
+                    label = d['direccion'].upper()
+                    color = "#10b981" if label == "SUBE" else "#ef4444"
+                    
+                    # Gráfico de Gauge (Velocímetro)
+                    fig_gauge = go.Figure(go.Indicator(
+                        mode = "gauge+number",
+                        value = prob * 100,
+                        domain = {'x': [0, 1], 'y': [0, 1]},
+                        title = {'text': f"Confianza en: {label}"},
+                        gauge = {
+                            'axis': {'range': [0, 100]},
+                            'bar': {'color': color},
+                            'steps': [
+                                {'range': [0, 50], 'color': "lightgray"},
+                                {'range': [50, 100], 'color': "gray"}
+                            ]
+                        }
+                    ))
+                    fig_gauge.update_layout(height=300, margin=dict(l=20, r=20, t=50, b=20))
+                    st.plotly_chart(fig_gauge, use_container_width=True)
+
+    with st.expander("🧠 ¿Cómo funciona este modelo?"):
+        st.markdown("""
+        Este módulo utiliza un algoritmo de **Random Forest Classifier**. 
+        - **Entradas:** Precios históricos, volumen e indicadores técnicos (RSI, Medias Móviles).
+        - **Salida:** Clasifica si el precio de cierre de mañana será superior (**Sube**) o inferior (**Baja**) al de hoy.
+        - **Probabilidad:** Indica qué tan seguro está el modelo de su decisión.
+        """)

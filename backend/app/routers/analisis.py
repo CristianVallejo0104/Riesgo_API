@@ -1,6 +1,6 @@
 import pandas as pd
 import numpy as np
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, status, Query
 from sqlalchemy import select
 from scipy import stats as scipy_stats
 
@@ -153,3 +153,72 @@ def stress_test(db: DBSession):
     df_rend = pd.DataFrame(rendimientos).dropna()
     servicio = StressService(df_rend)
     return {"escenarios": servicio.stress_test()}
+
+@router.get("/capm")
+def calcular_capm(
+    db: DBSession,
+    tickers: list[str] = Query(..., description="Lista de tickers a analizar"),
+    benchmark: str = Query("^GSPC", description="Ticker del benchmark"),
+    tasa_libre_riesgo: float = Query(0.04, description="Tasa FRED actual en decimal")
+):
+    # ¡Ahora usamos la tasa real que nos envíe el frontend!
+    rf_anual = tasa_libre_riesgo
+    
+    servicio_data = DataService(db)
+
+    try:
+        precios_bench = servicio_data.descargar_precios(benchmark)
+        if not precios_bench:
+            raise ValueError(f"No se pudieron descargar datos para el benchmark {benchmark}")
+            
+        df_bench = pd.DataFrame([{"fecha": p.fecha, "close": p.close} for p in precios_bench])
+        df_bench.set_index("fecha", inplace=True)
+        df_bench["ret_bench"] = np.log(df_bench["close"] / df_bench["close"].shift(1))
+        df_bench = df_bench.dropna()
+        ret_anual_bench = float(df_bench["ret_bench"].mean() * 252)
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Error {benchmark}: {str(e)}")
+
+    resultados = []
+
+    for t in tickers:
+        try:
+            precios_t = servicio_data.descargar_precios(t)
+            if not precios_t: continue
+                
+            df_t = pd.DataFrame([{"fecha": p.fecha, "close": p.close} for p in precios_t])
+            df_t.set_index("fecha", inplace=True)
+            df_t["ret_activo"] = np.log(df_t["close"] / df_t["close"].shift(1))
+            df_t = df_t.dropna()
+
+            df_merge = pd.merge(df_t["ret_activo"], df_bench["ret_bench"], left_index=True, right_index=True).dropna()
+
+            if len(df_merge) > 1:
+                cov = np.cov(df_merge["ret_activo"], df_merge["ret_bench"])[0, 1]
+                var_m = np.var(df_merge["ret_bench"], ddof=1)
+                beta = float(cov / var_m) if var_m != 0 else 0.0
+
+                ret_anual_activo = float(df_merge["ret_activo"].mean() * 252)
+                rend_esperado_capm = float(rf_anual + beta * (ret_anual_bench - rf_anual))
+                alpha_jensen = float(ret_anual_activo - rend_esperado_capm)
+
+                corr = np.corrcoef(df_merge["ret_activo"], df_merge["ret_bench"])[0, 1]
+                r2 = float(corr ** 2)
+
+                clasificacion = "Agresivo" if beta > 1.2 else ("Defensivo" if beta < 0.8 else "Neutro")
+
+                resultados.append({
+                    "ticker": t, "beta": beta, "clasificacion": clasificacion,
+                    "rendimiento_esperado_capm": rend_esperado_capm,
+                    "prima_riesgo": rend_esperado_capm - rf_anual,
+                    "alpha_jensen": alpha_jensen, "r_cuadrado": r2,
+                    "tasa_libre_riesgo_anual": rf_anual,
+                    "rendimiento_mercado_anual": ret_anual_bench
+                })
+        except Exception:
+            continue
+
+    if not resultados:
+        raise HTTPException(status_code=400, detail="No se pudo calcular el CAPM.")
+
+    return {"benchmark": benchmark, "activos": resultados}
