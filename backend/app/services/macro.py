@@ -36,3 +36,10 @@ class MacroService:
                 logger.warning(f"No se pudo obtener {serie}: {e}")
 
         return {"plazos": plazos, "tasas": tasas}
+    
+    def inflacion(self) -> float:
+        datos = self.fred.get_series("CPIAUCSL")
+        datos = datos.dropna()
+        # Inflación anualizada: variación % 12 meses
+        inflacion = float((datos.iloc[-1] / datos.iloc[-13] - 1) * 100)
+        return round(inflacion, 4)

@@ -1100,125 +1100,51 @@ with tabs[7]:
             st.divider()
 
 
-# ═══════════════════ MÓD 8 — MACRO ═══════════════════
-
 # ═══════════════════ TAB 8 — CONTEXTO MACRO Y BENCHMARK ═══════════════════
 
 with tabs[8]:
     st.subheader("🌐 Contexto Macroeconómico y Benchmark")
-    
-    # Botón unificado
-    if st.button("🔄 Cargar Análisis Macro y Comparativa", key="btn_macro_bench"):
-        with st.spinner("Consultando FRED y calculando métricas de gestión activa..."):
-            
-            # 1. PARTE MACRO: Curva de Rendimiento (USA FRED)
-            data_curva = api_get("/renta-fija/curva")
-            
-            # 2. PARTE BENCHMARK: Obtenemos precios para calcular métricas de gestión
-            precios_bench = api_get(f"/precios/{urllib.parse.quote(benchmark, safe='')}")
-            precios_portafolio = {}
-            for t in tickers:
-                p_t = api_get(f"/precios/{urllib.parse.quote(t, safe='')}")
-                if p_t:
-                    df_t = pd.DataFrame(p_t)
-                    df_t["fecha"] = pd.to_datetime(df_t["fecha"])
-                    precios_portafolio[t] = df_t.set_index("fecha")["close"]
 
-        # ─── SECCIÓN A: CURVA DE RENDIMIENTO ──────────────────────────────────
-        if data_curva:
-            st.markdown("#### 📊 Curva de Rendimiento USA (FRED)")
-            datos = data_curva["datos_mercado"]
-            df_curva = pd.DataFrame({
-                "Plazo (años)": datos["plazos"], 
-                "Tasa (%)": datos["tasas"]
-            })
-            
-            fig_c = go.Figure()
-            fig_c.add_trace(go.Scatter(
-                x=df_curva["Plazo (años)"], y=df_curva["Tasa (%)"],
-                mode="lines+markers", name="Treasury Yield Curve",
-                line=dict(color="#38BDF8", width=3),
-                marker=dict(size=8, symbol="diamond")
-            ))
-            
-            try:
-                fig_c.update_layout(**plotly_layout("Estructura Temporal de Tasas de Interés", height=350))
-            except:
-                fig_c.update_layout(title="Curva de Rendimiento", height=350, template="plotly_dark")
-            
+    if st.button("🔄 Cargar datos macro y benchmark", key="btn_m8"):
+        with st.spinner("Consultando FRED y calculando métricas..."):
+            data_macro = api_get("/macro/")
+            data_bench = api_get("/macro/benchmark", params={"benchmark": benchmark})
+
+        if data_macro:
+            col1, col2 = st.columns(2)
+            with col1:
+                st.metric("Tasa Libre de Riesgo (FRED)", f"{data_macro['tasa_libre_riesgo']*100:.2f}%")
+            with col2:
+                st.metric("Inflación Anual USA (FRED)", f"{data_macro['inflacion_anual_pct']:.2f}%")
+
+            curva = data_macro["curva"]
+            df_curva = pd.DataFrame({"Plazo (años)": curva["plazos"], "Tasa (%)": curva["tasas"]})
+            fig_c = px.line(df_curva, x="Plazo (años)", y="Tasa (%)",
+                            title="Curva de Rendimiento USA (FRED)", markers=True)
             st.plotly_chart(fig_c, use_container_width=True)
 
-            with st.expander("ℹ️ Interpretación de la Pendiente"):
-                st.markdown("""
-                - **Pendiente Positiva:** Escenario normal. Las tasas largas son mayores que las cortas (expectativa de crecimiento).
-                - **Invertida (2Y vs 10Y):** Históricamente, una señal de **recesión inminente**.
-                - **Plana:** Transición e incertidumbre sobre la política monetaria.
-                """)
-
-        st.divider()
-
-        # ─── SECCIÓN B: MÉTRICAS VS BENCHMARK ────────────────────────────────
-        if precios_bench and precios_portafolio:
-            st.markdown(f"#### 📈 Desempeño del Portafolio vs {benchmark}")
-            
-            # Cálculo de rendimientos acumulados y métricas
-            df_b = pd.DataFrame(precios_bench)
-            df_b["fecha"] = pd.to_datetime(df_b["fecha"])
-            df_b.set_index("fecha", inplace=True)
-            ret_b = df_b["close"].pct_change().dropna()
-            
-            # Rendimiento del portafolio (Equiponderado por defecto)
-            df_all_p = pd.DataFrame(precios_portafolio).pct_change().dropna()
-            ret_p = df_all_p.mean(axis=1) # Promedio de rendimientos (IGUAL PESO)
-            
-            # Alinear series
-            df_comp = pd.merge(ret_p.rename("port"), ret_b.rename("bench"), left_index=True, right_index=True)
-            
-            # Cálculos de Gestión Activa
-            cum_p = (1 + df_comp["port"]).prod() - 1
-            cum_b = (1 + df_comp["bench"]).prod() - 1
-            exceso = df_comp["port"] - df_comp["bench"]
-            tracking_error = exceso.std() * np.sqrt(252)
-            alpha_jensen = (cum_p - cum_b) * 100 # Simplificado para visualización
-            info_ratio = exceso.mean() / exceso.std() if exceso.std() != 0 else 0
-            
-            # Drawdowns
-            def get_mdd(returns):
-                cum = (1 + returns).cumprod()
-                peak = cum.cummax()
-                dd = (cum - peak) / peak
-                return dd.min() * 100
-
-            mdd_p = get_mdd(df_comp["port"])
-            mdd_b = get_mdd(df_comp["bench"])
-
-            # UI de Alerta
-            if cum_p > cum_b:
-                st.success(f"✅ El portafolio **supera** al benchmark en rendimiento acumulado ({cum_p*100:.2f}% > {cum_b*100:.2f}%)")
-            else:
-                st.warning(f"⚠️ El portafolio **no supera** al benchmark ({cum_p*100:.2f}% < {cum_b*100:.2f}%)")
-
-            # Grid de Métricas (Igual al proyecto anterior)
+        if data_bench:
+            st.markdown(f"### 📊 Desempeño vs {benchmark}")
             c1, c2, c3, c4 = st.columns(4)
-            c1.metric("Rend. Acum. Port.", f"{cum_p*100:.2f}%")
-            c2.metric("Rend. Acum. Bench.", f"{cum_b*100:.2f}%")
-            c3.metric("Alpha Estimado", f"{alpha_jensen:.4f}%", 
-                      delta="Positivo ✅" if alpha_jensen > 0 else "Negativo ⚠️",
-                      delta_color="normal" if alpha_jensen > 0 else "inverse")
-            c4.metric("Information Ratio", f"{info_ratio:.4f}", help="Eficiencia del gestor activo.")
+            c1.metric("Tracking Error", f"{data_bench['tracking_error']*100:.2f}%")
+            c2.metric("Information Ratio", f"{data_bench['information_ratio']:.4f}")
+            c3.metric("Max Drawdown", f"{data_bench['max_drawdown']*100:.2f}%")
+            c4.metric("Sharpe Portafolio", f"{data_bench['sharpe_portafolio']:.4f}")
 
-            c5, c6, c7, c8 = st.columns(4)
-            c5.metric("Tracking Error", f"{tracking_error*100:.4f}%", help="Volatilidad del exceso de retorno.")
-            c6.metric("Max Drawdown Port.", f"{mdd_p:.2f}%")
-            c7.metric("Max Drawdown Bench.", f"{mdd_b:.2f}%")
-            c8.metric("Correlación P vs B", f"{df_comp['port'].corr(df_comp['bench']):.4f}")
+            col1, col2 = st.columns(2)
+            with col1:
+                st.metric("Retorno Acumulado Portafolio",
+                          f"{data_bench['retorno_acumulado_portafolio']*100:.2f}%")
+            with col2:
+                st.metric(f"Retorno Acumulado {benchmark}",
+                          f"{data_bench['retorno_acumulado_benchmark']*100:.2f}%")
 
-            with st.expander("ℹ️ Diccionario de Métricas de Gestión"):
-                st.markdown("""
-                - **Alpha:** El valor añadido por la selección de activos. Si es positivo, ganaste más de lo que el benchmark justifica.
-                - **Tracking Error:** Mide la "distancia" de tus movimientos vs el mercado. Un TE alto indica una gestión muy activa y diferente al índice.
-                - **Information Ratio:** Alpha dividido por Tracking Error. Mide si el riesgo extra que tomaste comparado con el benchmark valió la pena.
-                - **Max Drawdown:** La mayor caída "pico a valle". Es la prueba de fuego de la tolerancia al riesgo.
+            with st.expander("ℹ️ Interpretación"):
+                st.markdown(f"""
+                - **Tracking Error:** desviación del portafolio respecto al benchmark. Menor = más alineado.
+                - **Information Ratio:** exceso de retorno por unidad de tracking error. Mayor = mejor gestión activa.
+                - **Max Drawdown:** mayor caída desde un pico. Mide el peor escenario histórico.
+                - **Alpha de Jensen:** ver módulo CAPM para el alpha ajustado por riesgo.
                 """)
 
 # ═══════════════════ MÓD 9 — RENTA FIJA ═══════════════════
@@ -1296,6 +1222,32 @@ with tabs[9]:
             )
             
             st.plotly_chart(fig_rf, use_container_width=True)
+            st.divider()
+            st.markdown("#### 🔬 Comparación de 3 Aproximaciones ante Shocks")
+            with st.spinner("Calculando shocks..."):
+                data_sens = api_get("/renta-fija/sensibilidad",
+                                   params={"tasa_cupon": tasa_cupon, "vencimiento": vencimiento})
+            if data_sens:
+                precio_base = data_sens["precio_base"]
+                df_sens = pd.DataFrame(data_sens["shocks"])
+
+                fig_sens = go.Figure()
+                fig_sens.add_trace(go.Scatter(x=df_sens["shock_bp"], y=df_sens["precio_lineal"],
+                    name="Lineal (solo D*)", line=dict(dash="dot", color="#f59e0b")))
+                fig_sens.add_trace(go.Scatter(x=df_sens["shock_bp"], y=df_sens["precio_duracion_convexidad"],
+                    name="D* + Convexidad", line=dict(dash="dash", color="#6366f1")))
+                fig_sens.add_trace(go.Scatter(x=df_sens["shock_bp"], y=df_sens["precio_exacto"],
+                    name="Reprice Exacto", line=dict(color="#10b981", width=3)))
+                fig_sens.add_hline(y=precio_base, line_dash="dash", line_color="gray",
+                                   annotation_text=f"Base: ${precio_base:.2f}")
+                fig_sens.update_layout(title="Precio ante Shocks ±50/±100/±200 pb",
+                                       xaxis_title="Shock (pb)", yaxis_title="Precio ($)", height=400)
+                st.plotly_chart(fig_sens, use_container_width=True)
+                st.dataframe(df_sens.rename(columns={
+                    "shock_bp": "Shock (pb)", "precio_lineal": "Lineal",
+                    "precio_duracion_convexidad": "D+Convexidad",
+                    "precio_exacto": "Reprice Exacto", "cambio_pct_exacto": "Cambio %"
+                }).set_index("Shock (pb)"), use_container_width=True)
 
 
 # ═══════════════════ MÓD 10 — OPCIONES ═══════════════════

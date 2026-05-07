@@ -70,3 +70,39 @@ class FixedIncomeService:
             "convexidad": round(float(convexidad), 4),
             "tasa_descuento": round(tasa, 6),
         }
+    
+    def sensibilidad_shocks(self, tasa_cupon: float = 0.05, valor_nominal: float = 100, vencimiento: int = 10) -> list:
+        resultado_base = self.duracion_y_convexidad(tasa_cupon, valor_nominal, vencimiento)
+        precio_base = resultado_base["precio_bono"]
+        duracion_mod = resultado_base["duracion"] / (1 + resultado_base["tasa_descuento"])
+        convexidad = resultado_base["convexidad"]
+        tasa_base = resultado_base["tasa_descuento"]
+
+        shocks_bp = [-200, -100, -50, 50, 100, 200]
+        resultados = []
+
+        for shock_bp in shocks_bp:
+            delta_y = shock_bp / 10000
+            nueva_tasa = tasa_base + delta_y
+
+            # Aprox. lineal (solo duración)
+            cambio_lineal = -duracion_mod * delta_y * precio_base
+            precio_lineal = precio_base + cambio_lineal
+
+            # Aprox. segundo orden (duración + convexidad)
+            cambio_dc = (-duracion_mod * delta_y + 0.5 * convexidad * delta_y**2) * precio_base
+            precio_dc = precio_base + cambio_dc
+
+            # Reprice exacto
+            flujos = [tasa_cupon * valor_nominal] * (vencimiento - 1) + [tasa_cupon * valor_nominal + valor_nominal]
+            precio_exacto = sum(f / (1 + nueva_tasa)**t for t, f in enumerate(flujos, 1))
+
+            resultados.append({
+                "shock_bp": shock_bp,
+                "precio_lineal": round(precio_lineal, 4),
+                "precio_duracion_convexidad": round(precio_dc, 4),
+                "precio_exacto": round(precio_exacto, 4),
+                "cambio_pct_exacto": round((precio_exacto - precio_base) / precio_base * 100, 4),
+            })
+
+        return resultados

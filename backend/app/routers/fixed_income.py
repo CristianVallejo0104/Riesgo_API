@@ -40,3 +40,14 @@ def calcular_duracion(tasa_cupon: float = 0.05, vencimiento: int = 10):
     datos = macro.curva_rendimiento()
     servicio = FixedIncomeService(datos["plazos"], datos["tasas"])
     return servicio.duracion_y_convexidad(tasa_cupon=tasa_cupon, vencimiento=vencimiento)
+
+
+@router.get("/sensibilidad")
+def sensibilidad_bono(tasa_cupon: float = 0.05, vencimiento: int = 10):
+    macro = MacroService()
+    datos = macro.curva_rendimiento()
+    servicio = FixedIncomeService(datos["plazos"], datos["tasas"])
+    return {
+        "precio_base": servicio.duracion_y_convexidad(tasa_cupon, 100, vencimiento)["precio_bono"],
+        "shocks": servicio.sensibilidad_shocks(tasa_cupon, 100, vencimiento)
+    }
