@@ -1431,6 +1431,23 @@ with tabs[11]:
                         </div>
                     """, unsafe_allow_html=True)
                     st.write("") # Espaciador
+            
+            # Heatmap activo × escenario
+            st.markdown("#### 🗺️ Heatmap de Sensibilidad: Activo × Escenario")
+            escenarios = data_st["escenarios"]
+            nombres_esc = [e["escenario"] for e in escenarios]
+            activos_hm = list(escenarios[0].get("impactos_por_activo", {}).keys()) if escenarios else []
+                
+            if activos_hm:
+                matriz = [[e.get("impactos_por_activo", {}).get(a, 0) * 100 for e in escenarios] for a in activos_hm]
+                fig_hm = go.Figure(data=go.Heatmap(
+                    z=matriz, x=nombres_esc, y=activos_hm,
+                    colorscale="RdYlGn", zmid=0,
+                    text=[[f"{v:.1f}%" for v in row] for row in matriz],
+                    texttemplate="%{text}", colorbar=dict(title="Impacto %"),
+                ))
+                fig_hm.update_layout(title="Impacto % por Activo y Escenario", height=350)
+                st.plotly_chart(fig_hm, use_container_width=True)
 
 
 # ═══════════════════ ML ═══════════════════
