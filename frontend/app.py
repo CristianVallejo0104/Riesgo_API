@@ -46,9 +46,9 @@ API = os.getenv("BACKEND_URL", "http://127.0.0.1:8000")
 
 # ═══════════════════ HELPERS ═══════════════════
 
-def api_get(ep, params=None):
+def api_get(ep, params=None, timeout=120):
     try:
-        r = requests.get(f"{API}{ep}", params=params, timeout=120); r.raise_for_status(); return r.json()
+        r = requests.get(f"{API}{ep}", params=params, timeout=timeout); r.raise_for_status(); return r.json()
     except requests.exceptions.ConnectionError:
         st.error("❌ Backend no disponible. Asegúrate de que corre en :8000"); return None
     except requests.exceptions.HTTPError as e:
@@ -65,6 +65,13 @@ def api_post(ep, body=None):
         st.error(f"❌ Error {e.response.status_code}: {e.response.json().get('detail', str(e))}"); return None
     except Exception as e:
         st.error(f"❌ {e}"); return None
+
+@st.cache_data(ttl=300)
+def cached_get(endpoint: str, params_str: str =""):
+    """api_get cacheada - evita re--lamadas en cada re-render de Streamlit"""
+    import json
+    params=json.loads(params_str) if params_str else None
+    return api_get(endpoint, params)
 
 def descargar_si_no_existe(ticker):
     """Descarga precios si no existen en BD (maneja 404 silenciosamente)."""
@@ -227,7 +234,7 @@ with tabs[1]:
     st.markdown("### Rendimiento comparado — Todos los activos (Base 100)")
     fig_comp = go.Figure()
     for t in tickers:
-        r_p = api_get(f"/precios/{t}")
+        r_p = cached_get(f"/precios/{t}")
         if r_p and len(r_p) > 0:
             df_t = pd.DataFrame(r_p)
             df_t["fecha"] = pd.to_datetime(df_t["fecha"])
@@ -241,7 +248,7 @@ with tabs[1]:
     st.markdown(f"### Análisis individual — {ticker_sel}")
 
     # Velas japonesas
-    r_precios = api_get(f"/precios/{ticker_sel}")
+    r_precios = cached_get(f"/precios/{ticker_sel}")
     if r_precios and len(r_precios) > 0:
         df_p = pd.DataFrame(r_precios)
         df_p["fecha"] = pd.to_datetime(df_p["fecha"])
@@ -253,7 +260,7 @@ with tabs[1]:
         st.plotly_chart(fig_velas, use_container_width=True)
 
     # Indicadores
-    data_ind = api_get(f"/analisis/indicadores/{ticker_sel}")
+    data_ind = cached_get(f"/analisis/indicadores/{ticker_sel}")
     if data_ind:
         df = pd.DataFrame(data_ind["indicadores"]).T
         df.index = pd.to_datetime(df.index)
@@ -315,8 +322,8 @@ with tabs[2]:
     ticker_r = st.selectbox("Seleccione un activo", tickers, key="m2_ticker")
 
     with st.spinner("Calculando métricas y procesando series de tiempo..."):
-        data_stats = api_get(f"/analisis/rendimientos/{ticker_r}")
-        data_serie = api_get(f"/analisis/rendimientos-serie/{ticker_r}")
+        data_stats = cached_get(f"/analisis/rendimientos/{ticker_r}")
+        data_serie = cached_get(f"/analisis/rendimientos-serie/{ticker_r}")
 
     if data_stats and data_serie:
         df_r = pd.DataFrame(data_serie["serie"])
@@ -409,7 +416,7 @@ with tabs[2]:
             # Boxplot Comparativo (Top 5 activos del portafolio)
             fig_box = go.Figure()
             for t in tickers[:5]:
-                serie_box = api_get(f"/analisis/rendimientos-serie/{t}")
+                serie_box = cached_get(f"/analisis/rendimientos-serie/{t}")
                 if serie_box:
                     r_log = pd.Series([x["rendimiento"] for x in serie_box["serie"]]) * 100
                     fig_box.add_trace(go.Box(y=r_log, name=t, boxpoints="outliers", marker_size=2))
@@ -460,16 +467,21 @@ with tabs[3]:
     )
 
     ticker_g = st.selectbox("Seleccione un activo para modelar", tickers, key="m3_ticker")
-
+    cache_key_m3=f"vol_{ticker_g}"
     if st.button("🔄 Analizar Volatilidad Condicional", key="btn_m3"):
-        with st.spinner("Consultando modelos EWMA y GARCH en el servidor..."):
-            safe_ticker = urllib.parse.quote(ticker_g, safe='')
+        if cache_key_m3 not in st.session_state:
+            with st.spinner("Consultando modelos EWMA y GARCH en el servidor..."):
+                safe_ticker = urllib.parse.quote(ticker_g, safe='')
+                st.session_state[cache_key_m3]={
+                    "ewma" : api_get(f"/analisis/ewma/{safe_ticker}"),
+                    "garch" : api_get(f"/analisis/garch/{safe_ticker}"),
+                    "precios" : api_get(f"/precios/{safe_ticker}"),
+                }
+    if cache_key_m3 in st.session_state:
+        ewma_data =st.session_state[cache_key_m3]["ewma"]
+        garch_data =st.session_state[cache_key_m3]["garch"]
+        precios_data =st.session_state[cache_key_m3]["precios"]
             
-            # Consultamos los 3 endpoints necesarios
-            ewma_data = api_get(f"/analisis/ewma/{safe_ticker}")
-            garch_data = api_get(f"/analisis/garch/{safe_ticker}")
-            precios_data = api_get(f"/precios/{safe_ticker}")
-
         if ewma_data and garch_data and precios_data:
             # ── 1. Procesamiento para el Gráfico de Volatilidad ────────────────
             df_p = pd.DataFrame(precios_data)
@@ -554,28 +566,26 @@ with tabs[3]:
 with tabs[4]:
     st.subheader("🎯 CAPM — Capital Asset Pricing Model")
     st.info("El CAPM determina el rendimiento esperado de un activo basado en su riesgo sistemático (Beta) frente al mercado.")
-
+    cache_key_m4=f"capm_{'-'.join(tickers)}_{benchmark}"
     if st.button("🔄 Calcular CAPM", key="btn_m4"):
         descargar_si_no_existe(benchmark)
-        with st.spinner("Consultando FRED y calculando métricas en el servidor..."):
-            
-            # 1. Obtenemos la tasa real de FRED primero
-            rf_real = 0.04 # Fallback por si FRED no responde
-            try:
-                curva = api_get("/renta-fija/curva")
-                if curva and "datos_mercado" in curva and "tasas" in curva["datos_mercado"]:
-                    rf_real = curva["datos_mercado"]["tasas"][0] / 100
-            except:
-                pass
+        if cache_key_m4 not in st.session_state:
+            with st.spinner("Consultando FRED y calculando métricas en el servidor..."):
+                rf_real = 0.04
+                try:
+                    curva = api_get("/renta-fija/curva")
+                    if curva and "datos_mercado" in curva and "tasas" in curva["datos_mercado"]:
+                        rf_real = curva["datos_mercado"]["tasas"][0] / 100
+                except:
+                    pass
+                st.session_state[cache_key_m4] = api_get("/analisis/capm", params={
+                    "tickers": tickers,
+                    "benchmark": benchmark,
+                    "tasa_libre_riesgo": rf_real
+                })
+        data_capm = st.session_state.get(cache_key_m4)
 
-            # 2. Le pasamos la tasa real al backend en los parámetros
-            params_capm = {
-                "tickers": tickers, 
-                "benchmark": benchmark,
-                "tasa_libre_riesgo": rf_real
-            }
-            data_capm = api_get("/analisis/capm", params=params_capm)
-
+        
         if data_capm and "activos" in data_capm:
             rf_val = data_capm['activos'][0]['tasa_libre_riesgo_anual']
             st.success(f"✅ Tasa Libre de Riesgo (FRED): **{rf_val * 100:.2f}%** | Benchmark: **{data_capm['benchmark']}**")
@@ -681,13 +691,17 @@ with tabs[5]:
     with col_v2:
         st.write(f"**Confianza:** {confianza_var:.0%} | **Capital:** ${valor_portafolio:,.0f}")
 
+    cache_key_m5 = f"var_{ticker_v}_{confianza_var}"
     if st.button("🔄 Ejecutar Análisis de Riesgo", key="btn_var_run"):
-        with st.spinner(f"Calculando métricas de riesgo para {ticker_v}..."):
-            safe_ticker = urllib.parse.quote(ticker_v, safe='')
-            
-            # 1. Obtenemos datos de VaR y de Rendimientos (para normalidad)
-            data_v = api_get(f"/analisis/var/{safe_ticker}")
-            data_r = api_get(f"/analisis/rendimientos/{safe_ticker}")
+        if cache_key_m5 not in st.session_state:
+            with st.spinner(f"Calculando métricas de riesgo para {ticker_v}..."):
+                safe_ticker = urllib.parse.quote(ticker_v, safe='')
+                st.session_state[cache_key_m5] = {
+                    "var": api_get(f"/analisis/var/{safe_ticker}"),
+                    "rend": api_get(f"/analisis/rendimientos/{safe_ticker}"),
+                }
+        data_v = st.session_state.get(cache_key_m5, {}).get("var")
+        data_r = st.session_state.get(cache_key_m5, {}).get("rend")
 
         if data_v and data_r:
             # Determinamos el método recomendado basado en la normalidad de Jarque-Bera
@@ -791,21 +805,25 @@ with tabs[6]:
         # Aquí habilitamos el checkbox que envía la señal al backend y a la nube
         permitir_cortos = st.checkbox("Permitir ventas en corto", key="m6_cortos")
     
+    cache_key_m6 = f"markowitz_{'-'.join(tickers)}_{permitir_cortos}"
     if st.button("🔄 Construir frontera eficiente", key="btn_markowitz"):
-        with st.spinner(f"Calculando línea matemática y simulando nube..."):
-            
-            # 1. Llamamos a TU BACKEND para obtener la línea y el óptimo exacto
-            data_m = api_get("/analisis/markowitz", params={"permitir_cortos": permitir_cortos})
-            
-            # 2. Descargamos precios para generar la nube de fondo y la matriz localmente
-            precios_dict = {}
-            for t in tickers:
-                safe_t = urllib.parse.quote(t, safe='')
-                p_data = api_get(f"/precios/{safe_t}")
-                if p_data and isinstance(p_data, list) and len(p_data) > 0:
-                    df_p = pd.DataFrame(p_data)
-                    df_p["fecha"] = pd.to_datetime(df_p["fecha"])
-                    precios_dict[t] = df_p.set_index("fecha")["close"]
+        if cache_key_m6 not in st.session_state:
+            with st.spinner(f"Calculando línea matemática y simulando nube..."):
+                data_m = api_get("/analisis/markowitz", params={"permitir_cortos": permitir_cortos})
+                precios_dict = {}
+                for t in tickers:
+                    safe_t = urllib.parse.quote(t, safe='')
+                    p_data = cached_get(f"/precios/{safe_t}")
+                    if p_data and isinstance(p_data, list) and len(p_data) > 0:
+                        df_p = pd.DataFrame(p_data)
+                        df_p["fecha"] = pd.to_datetime(df_p["fecha"])
+                        precios_dict[t] = df_p.set_index("fecha")["close"]
+                st.session_state[cache_key_m6] = {
+                    "data_m": data_m,
+                    "precios_dict": precios_dict,
+                }
+            data_m = st.session_state.get(cache_key_m6, {}).get("data_m")
+            precios_dict = st.session_state.get(cache_key_m6, {}).get("precios_dict", {})
 
             if len(precios_dict) < 2:
                 st.error("⚠️ Se necesitan al menos 2 activos con historial de precios para simular.")
@@ -1027,7 +1045,7 @@ with tabs[7]:
     for t in tickers:
         # Llamada al backend actual
         safe_t = urllib.parse.quote(t, safe='')
-        data_s = api_get(f"/analisis/indicadores/{safe_t}")
+        data_s = cached_get(f"/analisis/indicadores/{safe_t}")
         
         if data_s and "indicadores" in data_s:
             # Convertimos a DataFrame y tomamos el último registro
@@ -1404,7 +1422,10 @@ with tabs[11]:
     st.warning("Evaluación del impacto del portafolio ante eventos de 'Cisne Negro' históricos y catastróficos.")
     
     if st.button("🔄 Ejecutar Simulación de Crisis", key="btn_m11"):
-        data_st = api_get("/analisis/stress-test")
+        if "stress_test" not in st.session_state:
+            with st.spinner("Ejecutando simulación de crisis..."):
+                st.session_state["stress_test"] = api_get("/analisis/stress-test")
+        data_st = st.session_state.get("stress_test")    
         
         if data_st:
             # 1. Gráfico de Impacto Global
@@ -1557,14 +1578,15 @@ with tabs[13]:
                         "sharpe": sharpe_v, "retorno_anual": ret_anual,
                         "volatilidad_anual": vol_anual, "beta_promedio": beta_prom,
                         "inversion": valor_portafolio,
-                    })
+                    }, timeout=360)
 
                 if resultado:
                     nivel_riesgo = resultado.get("riesgo", "N/A")
                     color_riesgo = {"ALTO": "🔴", "MEDIO": "🟡", "BAJO": "🟢"}.get(nivel_riesgo, "⚪")
                     st.markdown(f"### {color_riesgo} Nivel de Riesgo Global: **{nivel_riesgo}**")
                     st.divider()
-                    st.markdown(resultado["analisis"])
+                    texto= resultado["analisis"].replace("$", "\\$")
+                    st.markdown(texto)
                     st.divider()
                     st.caption(f"Generado por **{resultado['modelo']}** via Ollama · "
                                f"Portafolio: {', '.join(resultado['portafolio'])}")
