@@ -160,8 +160,8 @@ python -m app.ml.train
 
 ## 🌐 Deploy en Render
 
-**URL pública del backend:** *(agregar URL después del deploy)*  
-**Swagger UI:** *(URL)/docs*  
+**URL pública del backend:** https://riesgo-api.onrender.com  
+**Swagger UI:** https://riesgo-api.onrender.com/docs 
 **ReDoc:** *(URL)/redoc*
 
 ### Pasos para deployar:
