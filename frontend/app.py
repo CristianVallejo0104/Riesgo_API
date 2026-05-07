@@ -177,7 +177,7 @@ tabs = st.tabs([
     "🎯 Contexto", "📈 1. Técnico", "📉 2. Rendimientos", "🌊 3. Volatilidad",
     "🎯 4. CAPM", "🛡️ 5. VaR/CVaR", "⚡ 6. Markowitz",
     "🚦 7. Señales", "🌐 8. Macro", "📐 9. Renta Fija",
-    "🧮 10. Opciones", "💥 11. Stress", "🤖 ML",
+    "🧮 10. Opciones", "💥 11. Stress", "🤖 ML", "🧠 Agente IA",
 ])
 
 
@@ -1507,3 +1507,99 @@ with tabs[12]:
         - **Salida:** Clasifica si el precio de cierre de mañana será superior (**Sube**) o inferior (**Baja**) al de hoy.
         - **Probabilidad:** Indica qué tan seguro está el modelo de su decisión.
         """)
+
+
+# ═══════════════════ AGENTE IA ═══════════════════
+
+with tabs[13]:
+    st.subheader("🧠 RiskLab AI — Agente Financiero Inteligente")
+    st.info("Análisis de riesgo en lenguaje natural potenciado por **llama3** corriendo localmente con Ollama.", icon="🤖")
+
+    # ── Estado de Ollama ──────────────────────────────────────────────────────
+    estado = api_get("/agente/estado")
+    if not estado or not estado.get("disponible"):
+        st.error("❌ Ollama no está corriendo. Abre una terminal y ejecuta: `ollama serve`")
+        st.stop()
+
+    st.success(f"✅ Ollama activo | Modelo: **{estado['modelo_activo']}** | "
+               f"Modelos instalados: {', '.join(estado['modelos'])}")
+
+    subtab_auto, subtab_chat = st.tabs(["📊 Análisis Automático", "💬 Chat Financiero"])
+
+    # ── Sub-tab 1: Análisis automático ────────────────────────────────────────
+    with subtab_auto:
+        st.markdown("El agente recopila todas las métricas del portafolio y genera un **informe ejecutivo** completo.")
+
+        if st.button("🔍 Generar Informe con IA", key="btn_agente", type="primary"):
+
+            with st.spinner("⏳ Recopilando métricas del portafolio..."):
+                data_var  = api_get(f"/analisis/var/{tickers[0]}")
+                data_port = api_get("/analisis/var-portafolio", params={"nivel": confianza_var})
+                data_mk   = api_get("/analisis/markowitz")
+                params_capm = {"tickers": tickers, "benchmark": benchmark, "tasa_libre_riesgo": tasa_fred}
+                data_capm = api_get("/analisis/capm", params=params_capm)
+
+            if not data_var or not data_port:
+                st.error("⚠️ Ve primero al Tab 1 para cargar los datos del portafolio.")
+            else:
+                var_h     = abs(data_var.get("var_historico", 0.02))
+                cvar_v    = abs(data_var.get("cvar", 0.025))
+                vol_anual = data_port.get("volatilidad_anual_portafolio", 0.15)
+                ret_anual = data_port.get("retorno_anual_esperado", 0.08)
+                sharpe_v  = data_mk["optimizacion"]["sharpe_ratio"] if data_mk and "optimizacion" in data_mk else 0.5
+                beta_prom = (sum(a["beta"] for a in data_capm["activos"]) / len(data_capm["activos"])
+                             if data_capm and "activos" in data_capm else 1.0)
+
+                with st.spinner("🧠 llama3 analizando el portafolio... (puede tardar 30-60 segundos)"):
+                    resultado = api_get("/agente/analisis", params={
+                        "tickers": tickers, "benchmark": benchmark,
+                        "var_historico": var_h, "cvar": cvar_v,
+                        "sharpe": sharpe_v, "retorno_anual": ret_anual,
+                        "volatilidad_anual": vol_anual, "beta_promedio": beta_prom,
+                        "inversion": valor_portafolio,
+                    })
+
+                if resultado:
+                    nivel_riesgo = resultado.get("riesgo", "N/A")
+                    color_riesgo = {"ALTO": "🔴", "MEDIO": "🟡", "BAJO": "🟢"}.get(nivel_riesgo, "⚪")
+                    st.markdown(f"### {color_riesgo} Nivel de Riesgo Global: **{nivel_riesgo}**")
+                    st.divider()
+                    st.markdown(resultado["analisis"])
+                    st.divider()
+                    st.caption(f"Generado por **{resultado['modelo']}** via Ollama · "
+                               f"Portafolio: {', '.join(resultado['portafolio'])}")
+
+    # ── Sub-tab 2: Chat ───────────────────────────────────────────────────────
+    with subtab_chat:
+        st.markdown("Haz preguntas sobre tu portafolio, conceptos de riesgo o métricas específicas.")
+
+        contexto_port = (
+            f"Portafolio: {', '.join(tickers)} | Benchmark: {benchmark} | "
+            f"Inversión: ${valor_portafolio:,.0f} | Confianza VaR: {confianza_var:.0%} | "
+            f"Tasa libre de riesgo: {tasa_fred*100:.2f}%"
+        )
+
+        if "chat_history" not in st.session_state:
+            st.session_state.chat_history = []
+
+        for msg in st.session_state.chat_history:
+            with st.chat_message(msg["role"]):
+                st.markdown(msg["content"])
+
+        if pregunta := st.chat_input("Pregunta algo... ej: ¿Qué activo tiene mayor riesgo sistemático?"):
+            st.session_state.chat_history.append({"role": "user", "content": pregunta})
+            with st.chat_message("user"):
+                st.markdown(pregunta)
+
+            with st.chat_message("assistant"):
+                with st.spinner("🤖 Pensando..."):
+                    resp = api_post("/agente/chat", {
+                        "pregunta": pregunta,
+                        "contexto": contexto_port,
+                    })
+                if resp:
+                    st.markdown(resp["respuesta"])
+                    st.session_state.chat_history.append({
+                        "role": "assistant",
+                        "content": resp["respuesta"],
+                    })

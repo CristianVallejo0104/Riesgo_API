@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
 from app.database import init_db   
-from app.routers import activos, portafolios, precios, analisis, fixed_income, options, ml, macro
+from app.routers import activos, portafolios, precios, analisis, fixed_income, options, ml, macro, agente
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -43,3 +43,4 @@ app.include_router(fixed_income.router)
 app.include_router(options.router)
 app.include_router(ml.router)
 app.include_router(macro.router)
+app.include_router(agente.router)
