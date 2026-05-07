@@ -12,6 +12,7 @@ from app.services.data import DataService,  TechnicalIndicators
 from app.config import get_settings
 from app.services.stress import StressService
 from app.models.db_models import Asset, Price, SignalLog
+from app.models.schemas import AssetResponse, PriceResponse, PortfolioCreate, PortfolioResponse, PredictionCreate, PredictionResponse, VaRResponse, MarkowitzResponse
 
 
 settings = get_settings()
@@ -45,7 +46,7 @@ def _obtener_precios_df(ticker: str, db) -> pd.DataFrame:
     return df
 
 
-@router.get("/var/{ticker}")
+@router.get("/var/{ticker}", response_model=VaRResponse)
 def calcular_var(ticker: str, db: DBSession):
     df = _obtener_precios_df(ticker, db)
     servicio = RiskService(df)
@@ -74,8 +75,8 @@ def calcular_ewma(ticker: str, db: DBSession):
         "volatilidad_ewma": servicio.volatilidad_ewma(),
     }
 
-@router.get("/markowitz")
-def optimizar_portafolio(db: DBSession, permitir_cortos: bool = False):
+@router.get("/markowitz", response_model=MarkowitzResponse)
+def optimizar_portafolio(db: DBSession, permitir_cortos: bool = False)
     servicio_data = DataService(db)
     tickers = settings.default_tickers
 

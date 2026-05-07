@@ -67,3 +67,78 @@ class PredictionResponse(BaseModel):
     creado_en: datetime
 
     model_config = {"from_attributes": True}
+
+
+# ── Opciones ──────────────────────────────────────────────────────────────────
+class OptionRequest(BaseModel):
+    S: float = Field(..., gt=0, description="Precio spot del activo")
+    K: float = Field(..., gt=0, description="Precio de ejercicio")
+    T: float = Field(..., gt=0, description="Tiempo al vencimiento en años")
+    r: float = Field(..., description="Tasa libre de riesgo")
+    sigma: float = Field(..., gt=0, description="Volatilidad")
+
+    @field_validator("T")
+    @classmethod
+    def t_positivo(cls, v):
+        if v <= 0:
+            raise ValueError("T debe ser mayor que 0")
+        return v
+
+    @field_validator("sigma")
+    @classmethod
+    def sigma_positivo(cls, v):
+        if v <= 0:
+            raise ValueError("sigma debe ser mayor que 0")
+        return v
+
+
+class GreeksResponse(BaseModel):
+    delta_call: float
+    delta_put: float
+    gamma: float
+    theta_call: float
+    vega: float
+    rho_call: float
+
+
+class OptionResponse(BaseModel):
+    parametros: dict
+    precios: dict
+    greeks: GreeksResponse
+    
+
+
+# ── VaR ───────────────────────────────────────────────────────────────────────
+class KupiecResult(BaseModel):
+    excepciones: int
+    n: int
+    p_value: float
+    aprobado: bool
+
+
+class VaRResponse(BaseModel):
+    ticker: str
+    var_parametrico: float
+    var_historico: float
+    var_montecarlo: float
+    cvar: float
+    kupiec: Optional[KupiecResult] = None
+
+
+# ── Portafolio ────────────────────────────────────────────────────────────────
+class PortfolioOptResult(BaseModel):
+    pesos: dict[str, float]
+    retorno_anual: float
+    riesgo_anual: float
+    sharpe_ratio: float
+
+
+class FronteraPoint(BaseModel):
+    retorno: float
+    riesgo: float
+
+
+class MarkowitzResponse(BaseModel):
+    tickers: list[str]
+    optimizacion: PortfolioOptResult
+    frontera: list[FronteraPoint]

@@ -1,11 +1,12 @@
 from fastapi import APIRouter
 
 from app.services.options import OptionsService
+from app.models.schemas import OptionResponse
 
 router = APIRouter(prefix="/opciones", tags=["Opciones"])
 
 
-@router.get("/black-scholes")
+@router.get("/black-scholes", response_model=OptionResponse)
 def calcular_black_scholes(S: float = 100, K: float = 100, T: float = 1, r: float = 0.04, sigma: float = 0.2):
     servicio = OptionsService(S, K, T, r, sigma)
     return {
@@ -24,3 +25,5 @@ def calcular_vol_implicita(S: float = 100, K: float = 100, T: float = 1, r: floa
         "precio_mercado": precio_mercado,
         "tipo": tipo,
     }
+
+
