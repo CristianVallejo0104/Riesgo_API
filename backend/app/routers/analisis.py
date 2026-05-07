@@ -222,3 +222,15 @@ def calcular_capm(
         raise HTTPException(status_code=400, detail="No se pudo calcular el CAPM.")
 
     return {"benchmark": benchmark, "activos": resultados}
+
+@router.get("/rendimientos-serie/{ticker}")
+def calcular_rendimientos_serie(ticker: str, db: DBSession):
+    df = _obtener_precios_df(ticker, db)
+    rendimientos = np.log(df["close"] / df["close"].shift(1)).dropna()
+    return {
+        "ticker": ticker,
+        "serie": [
+            {"fecha": str(fecha), "rendimiento": float(val)}
+            for fecha, val in rendimientos.items()
+        ]
+    }

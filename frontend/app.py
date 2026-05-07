@@ -13,44 +13,16 @@ import plotly.express as px
 
 
 def plotly_layout(title, height=350, xaxis_title="", yaxis_title=""):
-    """
-    Función auxiliar para aplicar un estilo profesional y coherente
-    a todas las gráficas de Plotly en el dashboard.
-    """
     return {
-        "title": {
-            "text": f"<b>{title}</b>",
-            "font": {"size": 18, "color": "#FFFFFF"},
-            "x": 0, "xanchor": "left"
-        },
+        "title": {"text": f"<b>{title}</b>", "font": {"size": 16, "color": "#1e293b"}, "x": 0},
         "paper_bgcolor": "rgba(0,0,0,0)",
         "plot_bgcolor": "rgba(0,0,0,0)",
         "height": height,
         "margin": dict(l=40, r=20, t=60, b=40),
-        "xaxis": {
-            "title": xaxis_title,
-            "gridcolor": "#334155",
-            "showgrid": True,
-            "zeroline": False,
-            "tickfont": {"color": "#94a3b8"}
-        },
-        "yaxis": {
-            "title": yaxis_title,
-            "gridcolor": "#334155",
-            "showgrid": True,
-            "zeroline": False,
-            "tickfont": {"color": "#94a3b8"}
-        },
-        "legend": {
-            "font": {"color": "#FFFFFF"},
-            "bgcolor": "rgba(0,0,0,0)",
-            "orientation": "h",
-            "yanchor": "bottom",
-            "y": 1.02,
-            "xanchor": "right",
-            "x": 1
-        },
-        "font": {"family": "Inter, Segoe UI, Roboto, sans-serif"}
+        "xaxis": {"title": xaxis_title, "gridcolor": "#e2e8f0", "showgrid": True},
+        "yaxis": {"title": yaxis_title, "gridcolor": "#e2e8f0", "showgrid": True},
+        "legend": {"orientation": "h", "yanchor": "bottom", "y": 1.02, "xanchor": "right", "x": 1},
+        "font": {"family": "Montserrat, sans-serif", "color": "#1e293b"}
     }
 
 st.set_page_config(page_title="RiskLab USTA", page_icon="📊", layout="wide", initial_sidebar_state="expanded")
@@ -337,24 +309,17 @@ with tabs[1]:
 
 with tabs[2]:
     st.subheader("📉 Rendimientos y Propiedades Empíricas")
-    
-    ticker_r = st.selectbox("Seleccione un activo para analizar", tickers, key="m2_ticker")
+    ticker_r = st.selectbox("Seleccione un activo", tickers, key="m2_ticker")
 
     with st.spinner("Calculando métricas y procesando series de tiempo..."):
-        # 1. Obtenemos estadísticas del backend
-        data_stats = api_get(f"/analisis/rendimientos/{urllib.parse.quote(ticker_r, safe='')}")
-        
-        # 2. Obtenemos precios para las gráficas
-        precios_r = api_get(f"/precios/{urllib.parse.quote(ticker_r, safe='')}")
+        data_stats = api_get(f"/analisis/rendimientos/{ticker_r}")
+        data_serie = api_get(f"/analisis/rendimientos-serie/{ticker_r}")
 
-    if data_stats and precios_r:
-        # Procesamiento de datos para gráficas
-        df_p = pd.DataFrame(precios_r)
-        df_p["fecha"] = pd.to_datetime(df_p["fecha"])
-        df_p.set_index("fecha", inplace=True)
-        # Calculamos rendimientos logarítmicos
-        df_p["rendimiento_log"] = np.log(df_p["close"] / df_p["close"].shift(1))
-        df_p = df_p.dropna()
+    if data_stats and data_serie:
+        df_r = pd.DataFrame(data_serie["serie"])
+        df_r["fecha"] = pd.to_datetime(df_r["fecha"])
+        df_r.set_index("fecha", inplace=True)
+        rend_vals = df_r["rendimiento"] * 100
         
         # ── 1. Métricas Principales (Fusión de ambos proyectos) ────────────────
         c1, c2, c3, c4, c5 = st.columns(5)
@@ -363,7 +328,7 @@ with tabs[2]:
         c3.metric("Asimetría (Skew)", f"{data_stats['asimetria']:.3f}")
         c4.metric("Curtosis", f"{data_stats['curtosis']:.3f}")
         # Percentil 5% (Cálculo local para complementar)
-        p5_val = df_p["rendimiento_log"].quantile(0.05)
+        p5_val = rend_vals.quantile(0.05) / 100
         c5.metric("Peor día (5%)", f"{p5_val*100:.2f}%")
 
         st.markdown("---")
@@ -375,7 +340,7 @@ with tabs[2]:
             # Serie de rendimientos log (Estilo área del proyecto anterior)
             fig_rend = go.Figure()
             fig_rend.add_trace(go.Scatter(
-                x=df_p.index, y=df_p["rendimiento_log"] * 100,
+                x=df_r.index, y=df_r["rendimiento"]*100,
                 name="Rend. log diario", 
                 line=dict(color="#A78BFA", width=0.8),
                 fill="tozeroy", 
@@ -389,7 +354,6 @@ with tabs[2]:
 
         with col_b:
             # Histograma vs Normal
-            rend_vals = df_p["rendimiento_log"] * 100
             mu, sigma = rend_vals.mean(), rend_vals.std()
             x_norm = np.linspace(rend_vals.min(), rend_vals.max(), 200)
             # Curva normal teórica
@@ -416,10 +380,10 @@ with tabs[2]:
 
         with col_c:
             # Q-Q Plot (Mejorado estadísticamente)
-            rend_sorted = np.sort(df_p["rendimiento_log"].dropna())
+            rend_sorted = np.sort(df_r["rendimiento"].dropna())
             # Cuantiles teóricos usando scipy
             from scipy import stats as sp_stats
-            cuantiles_teo = sp_stats.norm.ppf(np.linspace(0.01, 0.99, len(rend_sorted)), loc=df_p["rendimiento_log"].mean(), scale=df_p["rendimiento_log"].std())
+            cuantiles_teo = sp_stats.norm.ppf(np.linspace(0.01, 0.99, len(rend_sorted)), loc=df_r["rendimiento"].mean(), scale=df_r["rendimiento"].std())
             
             fig_qq = go.Figure()
             fig_qq.add_trace(go.Scatter(
@@ -442,11 +406,10 @@ with tabs[2]:
             # Boxplot Comparativo (Top 5 activos del portafolio)
             fig_box = go.Figure()
             for t in tickers[:5]:
-                dr_box = api_get(f"/precios/{urllib.parse.quote(t, safe='')}")
-                if dr_box:
-                    df_box = pd.DataFrame(dr_box)
-                    r_log = np.log(df_box["close"] / df_box["close"].shift(1)).dropna()
-                    fig_box.add_trace(go.Box(y=r_log * 100, name=t, boxpoints="outliers", marker_size=2))
+                serie_box = api_get(f"/analisis/rendimientos-serie/{t}")
+                if serie_box:
+                    r_log = pd.Series([x["rendimiento"] for x in serie_box["serie"]]) * 100
+                    fig_box.add_trace(go.Box(y=r_log, name=t, boxpoints="outliers", marker_size=2))
             try:
                 fig_box.update_layout(**plotly_layout("Comparativa de Volatilidad (Boxplot %)", height=350))
             except:
