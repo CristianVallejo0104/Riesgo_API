@@ -519,28 +519,29 @@ with tabs[3]:
                 st.info("Lambda (λ) = 0.94. El modelo de Suavizado Exponencial (EWMA) otorga exponencialmente mayor peso a los choques de mercado más recientes, reaccionando rápido a las crisis.")
 
             with col_garch:
-                st.markdown("##### 🌊 Modelo Óptimo GARCH")
-                # Mostramos el modelo que el backend eligió como el mejor
-                modelo_optimo = garch_data.get("orden", "N/A")
-                st.metric("Mejor Modelo (Selección Automática)", modelo_optimo)
+                st.markdown("##### 🌊 Modelo Óptimo (Selección por AIC)")
+                modelo_optimo = garch_data.get("mejor_modelo", garch_data.get("orden", "N/A"))
+                st.metric("Mejor Modelo", modelo_optimo)
                 
                 c1, c2, c3 = st.columns(3)
                 c1.metric("AIC", round(garch_data.get("aic", 0), 2))
                 c2.metric("BIC", round(garch_data.get("bic", 0), 2))
-                
                 persistencia = garch_data.get("persistencia", 0)
                 c3.metric("Persistencia (α+β)", f"{persistencia:.4f}")
-                
-                # Análisis dinámico de persistencia
-                if persistencia > 0.98:
-                    msg_persistencia = "Extremadamente alta (>0.98). Los shocks de volatilidad son casi permanentes."
-                elif persistencia > 0.90:
-                    msg_persistencia = "Alta (>0.90). El mercado tardará mucho tiempo en calmarse tras un shock."
-                else:
-                    msg_persistencia = "Moderada. La volatilidad revierte a su media razonablemente rápido."
-                    
-                st.success(f"**Análisis de Persistencia:** {msg_persistencia}")
 
+                if "tabla_comparativa" in garch_data:
+                    st.markdown("**Comparativa de modelos:**")
+                    df_tabla = pd.DataFrame(garch_data["tabla_comparativa"])
+                    df_tabla = df_tabla.sort_values("aic")
+                    df_tabla.columns = ["Modelo", "AIC", "BIC", "Log-Lik"]
+                    st.dataframe(df_tabla.set_index("Modelo"), use_container_width=True)
+
+                if persistencia > 0.98:
+                    st.error("Persistencia extrema (>0.98): shocks casi permanentes.")
+                elif persistencia > 0.90:
+                    st.warning("Persistencia alta (>0.90): mercado tardará en calmarse.")
+                else:
+                    st.success("Persistencia moderada: volatilidad revierte a la media.")
         else:
             st.error("⚠️ No se pudieron obtener los datos de volatilidad. Verifica que los endpoints '/ewma' y '/garch' funcionen correctamente en el backend.")
 
@@ -938,7 +939,46 @@ with tabs[6]:
                         # Si es venta en corto, el peso es negativo
                         signo = "" if w >= 0 else "🔴 Corto "
                         st.write(f"**{t}:** {w*100:.1f}% → **{signo}${w*valor_portafolio:,.0f}**")
-                        
+
+                # ── Comparación fronteras con/sin cortos ──
+                st.divider()
+                st.markdown("#### 📊 Comparación: Con vs Sin No-Negatividad")
+                with st.spinner("Calculando frontera con cortos..."):
+                    data_cortos = api_get("/analisis/markowitz", params={"permitir_cortos": True})
+
+                if data_cortos:
+                    frontera_cortos = pd.DataFrame(data_cortos.get("frontera", []))
+                    fig_comp = go.Figure()
+
+                    if not frontera.empty:
+                        fig_comp.add_trace(go.Scatter(
+                            x=frontera.sort_values("riesgo")["riesgo"] * 100,
+                            y=frontera.sort_values("riesgo")["retorno"] * 100,
+                            mode="lines", name="Sin cortos (wi ≥ 0)",
+                            line=dict(color="#10b981", width=3),
+                        ))
+                    if not frontera_cortos.empty:
+                        fc = pd.DataFrame(frontera_cortos).sort_values("riesgo")
+                        fig_comp.add_trace(go.Scatter(
+                            x=fc["riesgo"] * 100, y=fc["retorno"] * 100,
+                            mode="lines", name="Con cortos (wi ∈ ℝ)",
+                            line=dict(color="#f59e0b", width=3, dash="dash"),
+                        ))
+                    try:
+                        fig_comp.update_layout(**plotly_layout(
+                            "Costo de la restricción de no negatividad", height=400,
+                            xaxis_title="Volatilidad (%)", yaxis_title="Retorno (%)"))
+                    except:
+                        fig_comp.update_layout(title="Comparación fronteras", height=400)
+                    st.plotly_chart(fig_comp, use_container_width=True)
+                    
+                    with st.expander("ℹ️ Interpretación"):
+                        st.markdown("""
+                        - **Sin cortos:** solo posiciones largas. Más conservador, menor universo factible.
+                        - **Con cortos:** pesos negativos permitidos. Mayor flexibilidad, frontera más alta.
+                        - El **costo de la restricción** es la diferencia vertical entre ambas fronteras.
+                        """)
+
             else:
                 st.error("⚠️ El backend no logró calcular la frontera eficiente. Verifica los logs de FastAPI.")
 

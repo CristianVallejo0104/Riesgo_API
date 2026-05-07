@@ -53,3 +53,13 @@ class PredictionLog(Base):
     prediccion: Mapped[float] = mapped_column(Float, nullable=False)
     modelo_version: Mapped[str] = mapped_column(String(20), nullable=False)
     creado_en: Mapped[datetime] = mapped_column(DateTime, server_default=func.now()) 
+
+class SignalLog(Base):
+    __tablename__ = "signals_log"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    ticker: Mapped[str] = mapped_column(String(10), nullable=False)
+    regla: Mapped[str] = mapped_column(String(50), nullable=False)
+    señal: Mapped[str] = mapped_column(String(20), nullable=False)
+    valor: Mapped[float] = mapped_column(Float, nullable=False)
+    creado_en: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())

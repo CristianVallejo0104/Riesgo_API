@@ -133,3 +133,62 @@ class RiskService:
             "r_cuadrado": round(float(r_value ** 2), 4),
             "retorno_esperado_anual": round(float(retorno_esperado), 4),
         }
+    
+    def garch(self) -> dict:
+        from arch import arch_model
+
+        rendimientos_pct = self.rendimientos * 100
+        modelos = {}
+
+        # GARCH(1,1), GARCH(1,2), GARCH(2,1), GARCH(2,2)
+        for p in [1, 2]:
+            for q in [1, 2]:
+                try:
+                    m = arch_model(rendimientos_pct, vol="Garch", p=p, q=q)
+                    r = m.fit(disp="off")
+                    modelos[f"GARCH({p},{q})"] = r
+                except: continue
+
+        # EGARCH(1,1)
+        try:
+            m = arch_model(rendimientos_pct, vol="EGARCH", p=1, q=1)
+            r = m.fit(disp="off")
+            modelos["EGARCH(1,1)"] = r
+        except: pass
+
+        # GJR-GARCH(1,1)
+        try:
+            m = arch_model(rendimientos_pct, vol="GARCH", p=1, o=1, q=1)
+            r = m.fit(disp="off")
+            modelos["GJR-GARCH(1,1)"] = r
+        except: pass
+
+        if not modelos:
+            return {"error": "No se pudo ajustar ningún modelo"}
+
+        # Selección por AIC
+        mejor_nombre = min(modelos, key=lambda k: modelos[k].aic)
+        mejor = modelos[mejor_nombre]
+
+        # Tabla comparativa
+        tabla = [{"modelo": k, "aic": round(v.aic, 4), "bic": round(v.bic, 4),
+                "loglik": round(v.loglikelihood, 4)} for k, v in modelos.items()]
+
+        # Test ARCH-LM sobre residuos del mejor modelo
+        from arch.unitroot import PhillipsPerron
+        from scipy import stats
+        residuos = mejor.resid / mejor.conditional_volatility
+        _, arch_lm_pvalue = stats.normaltest(residuos.dropna())
+
+        persistencia = float(mejor.params.filter(like="alpha").sum() +
+                            mejor.params.filter(like="beta").sum())
+
+        return {
+            "mejor_modelo": mejor_nombre,
+            "aic": round(float(mejor.aic), 4),
+            "bic": round(float(mejor.bic), 4),
+            "volatilidad_actual": round(float(mejor.conditional_volatility.iloc[-1] / 100), 6),
+            "persistencia": round(persistencia, 4),
+            "tabla_comparativa": tabla,
+            "orden": mejor_nombre,
+        }

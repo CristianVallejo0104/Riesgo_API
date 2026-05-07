@@ -11,7 +11,7 @@ from app.services.portfolio import PortfolioService
 from app.services.data import DataService,  TechnicalIndicators
 from app.config import get_settings
 from app.services.stress import StressService
-from app.models.db_models import Asset, Price
+from app.models.db_models import Asset, Price, SignalLog
 
 
 settings = get_settings()
@@ -273,3 +273,48 @@ def var_portafolio(db: DBSession, nivel: float = 0.95):
         "retorno_anual_esperado": round(media_port, 4),
         "nivel_confianza": nivel,
     }
+
+@router.get("/alertas")
+def obtener_alertas(
+    db: DBSession,
+    rsi_sobrecompra: int = 70,
+    rsi_sobreventa: int = 30,
+):
+    tickers = settings.default_tickers
+    alertas = []
+
+    for ticker in tickers:
+        try:
+            df_precios = _obtener_precios_df(ticker, db)
+            indicadores = TechnicalIndicators(df_precios)
+            data = indicadores.calcular_todos()
+            df = pd.DataFrame(data).T
+            if len(df) == 0:
+                continue
+            ultimo = df.iloc[-1]
+            señales_ticker = []
+
+            if ultimo["rsi"] > rsi_sobrecompra:
+                señales_ticker.append(("RSI", "VENTA", float(ultimo["rsi"])))
+            elif ultimo["rsi"] < rsi_sobreventa:
+                señales_ticker.append(("RSI", "COMPRA", float(ultimo["rsi"])))
+
+            if ultimo["close"] > ultimo["bollinger_upper"]:
+                señales_ticker.append(("Bollinger", "VENTA", float(ultimo["close"])))
+            elif ultimo["close"] < ultimo["bollinger_lower"]:
+                señales_ticker.append(("Bollinger", "COMPRA", float(ultimo["close"])))
+
+            if ultimo["macd"] > ultimo["macd_signal"]:
+                señales_ticker.append(("MACD", "COMPRA", float(ultimo["macd"])))
+            else:
+                señales_ticker.append(("MACD", "VENTA", float(ultimo["macd"])))
+
+            for regla, señal, valor in señales_ticker:
+                log = SignalLog(ticker=ticker, regla=regla, señal=señal, valor=valor)
+                db.add(log)
+                alertas.append({"ticker": ticker, "regla": regla, "señal": señal, "valor": round(valor, 4)})
+        except:
+            continue
+
+    db.commit()
+    return {"alertas": alertas, "total": len(alertas)}
