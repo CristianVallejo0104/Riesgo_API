@@ -169,17 +169,14 @@ def calcular_capm(
     servicio_data = DataService(db)
 
     try:
-        precios_bench = servicio_data.descargar_precios(benchmark)
-        if not precios_bench:
-            raise ValueError(f"No se pudieron descargar datos para el benchmark {benchmark}")
-            
-        df_bench = pd.DataFrame([{"fecha": p.fecha, "close": p.close} for p in precios_bench])
-        df_bench.set_index("fecha", inplace=True)
+        df_bench = _obtener_precios_df(benchmark, db)
         df_bench["ret_bench"] = np.log(df_bench["close"] / df_bench["close"].shift(1))
         df_bench = df_bench.dropna()
         ret_anual_bench = float(df_bench["ret_bench"].mean() * 252)
+    except HTTPException:
+        raise HTTPException(status_code=400, detail=f"Benchmark {benchmark} no está en BD. Ve al Tab 1 primero.")
     except Exception as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Error {benchmark}: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"Error {benchmark}: {str(e)}")
 
     resultados = []
 

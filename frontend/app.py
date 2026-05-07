@@ -556,6 +556,7 @@ with tabs[4]:
     st.info("El CAPM determina el rendimiento esperado de un activo basado en su riesgo sistemático (Beta) frente al mercado.")
 
     if st.button("🔄 Calcular CAPM", key="btn_m4"):
+        descargar_si_no_existe(benchmark)
         with st.spinner("Consultando FRED y calculando métricas en el servidor..."):
             
             # 1. Obtenemos la tasa real de FRED primero
