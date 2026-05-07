@@ -10,7 +10,7 @@ import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 import plotly.express as px
-
+import os
 
 def plotly_layout(title, height=350, xaxis_title="", yaxis_title=""):
     return {
@@ -42,7 +42,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-API = "http://127.0.0.1:8000"
+API = os.getenv("BACKEND_URL", "http://127.0.0.1:8000")
 
 # ═══════════════════ HELPERS ═══════════════════
 
