@@ -11,6 +11,7 @@ from app.services.portfolio import PortfolioService
 from app.services.data import DataService,  TechnicalIndicators
 from app.config import get_settings
 from app.services.stress import StressService
+from app.models.db_models import Asset, Price
 
 
 settings = get_settings()
@@ -233,4 +234,42 @@ def calcular_rendimientos_serie(ticker: str, db: DBSession):
             {"fecha": str(fecha), "rendimiento": float(val)}
             for fecha, val in rendimientos.items()
         ]
+    }
+
+@router.get("/var-portafolio")
+def var_portafolio(db: DBSession, nivel: float = 0.95):
+    from scipy.stats import norm
+    tickers = settings.default_tickers
+    rendimientos = {}
+    
+    for ticker in tickers:
+        asset = db.scalars(select(Asset).where(Asset.ticker == ticker)).first()
+        if not asset:
+            continue
+        precios = db.scalars(
+            select(Price).where(Price.asset_id == asset.id).order_by(Price.fecha)
+        ).all()
+        if len(precios) < 2:
+            continue
+        closes = pd.Series([p.close for p in precios])
+        rendimientos[ticker] = np.log(closes / closes.shift(1)).dropna()
+
+    if len(rendimientos) < 2:
+        raise HTTPException(status_code=404, detail="No hay suficientes datos en BD")
+
+    df_rend = pd.DataFrame(rendimientos).dropna()
+    n = len(df_rend.columns)
+    pesos = np.array([1/n] * n)
+    cov = df_rend.cov().values * 252
+    vol_port = float(np.sqrt(pesos @ cov @ pesos))
+    media_port = float((df_rend.mean() * 252).values @ pesos)
+    z = norm.ppf(1 - nivel)
+    var_param = float(media_port/252 + z * vol_port/np.sqrt(252))
+    
+    return {
+        "tickers": list(df_rend.columns),
+        "var_parametrico_portafolio": round(var_param, 6),
+        "volatilidad_anual_portafolio": round(vol_port, 4),
+        "retorno_anual_esperado": round(media_port, 4),
+        "nivel_confianza": nivel,
     }

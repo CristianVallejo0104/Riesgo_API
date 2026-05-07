@@ -759,9 +759,20 @@ with tabs[5]:
                     | **Histórico** | Si hay **Colas Pesadas** o mucha asimetría. No asume normalidad. |
                     | **Monte Carlo** | El más flexible para portafolios complejos o simulaciones futuras. |
                     """)
-
+            st.divider()
+            st.markdown("### 📊 VaR del Portafolio Completo")
+            with st.spinner("Calculando..."):
+                data_vp = api_get("/analisis/var-portafolio", params={"nivel": confianza_var})
+            if data_vp:
+                c1, c2, c3 = st.columns(3)
+                c1.metric("VaR Portafolio", f"{data_vp['var_parametrico_portafolio']:.6f}",
+                        delta=f"-${abs(data_vp['var_parametrico_portafolio'])*valor_portafolio:,.0f}")
+                c2.metric("Volatilidad Anual", f"{data_vp['volatilidad_anual_portafolio']*100:.2f}%")
+                c3.metric("Retorno Esperado", f"{data_vp['retorno_anual_esperado']*100:.2f}%")
+                st.info("El VaR del portafolio es menor que la suma de los VaR individuales gracias a la **diversificación** entre activos.")
         else:
             st.error("⚠️ Error al conectar con el endpoint de VaR. Por favor verifica que el backend esté activo.")
+        
 
 # ═══════════════════ MÓD 6 — MARKOWITZ ═══════════════════
 
