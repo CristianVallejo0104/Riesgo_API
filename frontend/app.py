@@ -1343,6 +1343,56 @@ with tabs[10]:
                 
                 st.plotly_chart(fig_opt, use_container_width=True)
 
+                st.divider()
+            st.markdown("### 📊 Visualizaciones")
+            
+            spots = np.linspace(S * 0.5, S * 1.5, 100)
+            
+            col1, col2 = st.columns(2)
+            
+            # 1. Payoff a vencimiento
+            with col1:
+                payoff_call = np.maximum(spots - K, 0)
+                payoff_put = np.maximum(K - spots, 0)
+                fig_payoff = go.Figure()
+                fig_payoff.add_trace(go.Scatter(x=spots, y=payoff_call, name="Call", line=dict(color="#10b981", width=2)))
+                fig_payoff.add_trace(go.Scatter(x=spots, y=payoff_put, name="Put", line=dict(color="#ef4444", width=2)))
+                fig_payoff.add_vline(x=K, line_dash="dash", annotation_text=f"K={K}")
+                fig_payoff.update_layout(title="Payoff a Vencimiento", xaxis_title="Precio Spot", yaxis_title="Payoff ($)", height=320)
+                st.plotly_chart(fig_payoff, use_container_width=True)
+
+            # 2. Precio de la opción hoy vs spot
+            with col2:
+                from scipy.stats import norm as sp_norm
+                precios_call = []
+                for s in spots:
+                    if s <= 0: precios_call.append(0); continue
+                    d1 = (np.log(s/K) + (r_opt + sigma**2/2)*T) / (sigma*np.sqrt(T))
+                    d2 = d1 - sigma*np.sqrt(T)
+                    precios_call.append(s*sp_norm.cdf(d1) - K*np.exp(-r_opt*T)*sp_norm.cdf(d2))
+                intrinseco = np.maximum(spots - K, 0)
+                fig_precio = go.Figure()
+                fig_precio.add_trace(go.Scatter(x=spots, y=precios_call, name="Precio Call BS", line=dict(color="#6366f1", width=2)))
+                fig_precio.add_trace(go.Scatter(x=spots, y=intrinseco, name="Valor Intrínseco", line=dict(dash="dot", color="#f59e0b")))
+                fig_precio.add_vline(x=S, line_dash="dash", annotation_text=f"S actual={S}")
+                fig_precio.update_layout(title="Precio Call vs Spot", xaxis_title="Precio Spot", yaxis_title="Precio ($)", height=320)
+                st.plotly_chart(fig_precio, use_container_width=True)
+
+            # 3. Delta vs Spot para distintos T
+            fig_delta = go.Figure()
+            for t_val, color in [(0.25, "#ef4444"), (0.5, "#f59e0b"), (1.0, "#10b981"), (2.0, "#6366f1")]:
+                deltas = []
+                for s in spots:
+                    if s <= 0: deltas.append(0); continue
+                    d1 = (np.log(s/K) + (r_opt + sigma**2/2)*t_val) / (sigma*np.sqrt(t_val))
+                    deltas.append(sp_norm.cdf(d1))
+                fig_delta.add_trace(go.Scatter(x=spots, y=deltas, name=f"T={t_val}a", line=dict(color=color, width=2)))
+            fig_delta.add_vline(x=K, line_dash="dash", annotation_text=f"K={K}")
+            fig_delta.update_layout(title="Delta Call vs Spot (distintos T)", xaxis_title="Precio Spot", yaxis_title="Delta", height=350)
+            st.plotly_chart(fig_delta, use_container_width=True)
+
+
+
 # ═══════════════════ MÓD 11 — STRESS ═══════════════════
 
 with tabs[11]:
