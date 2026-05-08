@@ -835,212 +835,255 @@ with tabs[5]:
 
 with tabs[6]:
     st.subheader("⚡ Optimización de Markowitz — Frontera Eficiente")
-    
+    st.info(
+        "La **Teoría Moderna de Portafolios** de Markowitz busca el balance óptimo entre riesgo y retorno. "
+        "La **frontera eficiente** muestra todas las combinaciones de activos que maximizan el retorno para un nivel dado de riesgo.",
+        icon="💡",
+    )
+
+    # ── Controles ──
     col_c1, col_c2 = st.columns(2)
     with col_c1:
-        n_port = st.slider("Portafolios a simular (Fondo)", 1000, 30000, 5000, step=1000, key="m6_slider_n")
+        n_port = st.slider("Portafolios a simular (Monte Carlo)", 1000, 30000, 5000, step=1000, key="m6_slider_n")
     with col_c2:
-        # Aquí habilitamos el checkbox que envía la señal al backend y a la nube
         permitir_cortos = st.checkbox("Permitir ventas en corto", key="m6_cortos")
-    
+
+    # ── Carga automática ──
     cache_key_m6 = f"markowitz_{'-'.join(tickers)}_{permitir_cortos}"
-    if st.button("🔄 Construir frontera eficiente", key="btn_markowitz"):
-        if cache_key_m6 not in st.session_state:
-            with st.spinner(f"Calculando línea matemática y simulando nube..."):
-                data_m = api_get("/analisis/markowitz", params={"permitir_cortos": permitir_cortos})
-                precios_dict = {}
-                for t in tickers:
-                    safe_t = urllib.parse.quote(t, safe='')
-                    p_data = cached_get(f"/precios/{safe_t}")
-                    if p_data and isinstance(p_data, list) and len(p_data) > 0:
-                        df_p = pd.DataFrame(p_data)
-                        df_p["fecha"] = pd.to_datetime(df_p["fecha"])
-                        precios_dict[t] = df_p.set_index("fecha")["close"]
+    if cache_key_m6 not in st.session_state:
+        with st.spinner("Calculando frontera eficiente y descargando precios..."):
+            data_m = api_get("/analisis/markowitz", params={"permitir_cortos": permitir_cortos})
+            precios_dict = {}
+            for t in tickers:
+                safe_t = urllib.parse.quote(t, safe='')
+                p_data = cached_get(f"/precios/{safe_t}")
+                if p_data and isinstance(p_data, list) and len(p_data) > 0:
+                    df_p = pd.DataFrame(p_data)
+                    df_p["fecha"] = pd.to_datetime(df_p["fecha"])
+                    precios_dict[t] = df_p.set_index("fecha")["close"]
+
+            if data_m:
                 st.session_state[cache_key_m6] = {
                     "data_m": data_m,
                     "precios_dict": precios_dict,
                 }
-            data_m = st.session_state.get(cache_key_m6, {}).get("data_m")
-            precios_dict = st.session_state.get(cache_key_m6, {}).get("precios_dict", {})
 
-            if len(precios_dict) < 2:
-                st.error("⚠️ Se necesitan al menos 2 activos con historial de precios para simular.")
-            elif data_m and "optimizacion" in data_m:
-                opt = data_m["optimizacion"]
-                frontera = pd.DataFrame(data_m.get("frontera", []))
-                
-                # Extraer tasa FRED localmente para el Sharpe de la nube
-                rf_anual = 0.04
-                try:
-                    curva = api_get("/renta-fija/curva")
-                    if curva and "datos_mercado" in curva:
-                        rf_anual = curva["datos_mercado"]["tasas"][0] / 100
-                except: pass
+    cached = st.session_state.get(cache_key_m6, {})
+    data_m = cached.get("data_m")
+    precios_dict = cached.get("precios_dict", {})
 
-                st.success(f"✅ Optimización analítica completada. Rf usada: **{rf_anual * 100:.2f}%**")
+    if not data_m or len(precios_dict) < 2:
+        st.info("⏳ Ve primero al **Tab 1** para cargar los datos del portafolio.")
+    elif "optimizacion" not in data_m:
+        st.error("⚠️ El backend no logró calcular la frontera eficiente.")
+    else:
+        opt = data_m["optimizacion"]
+        frontera = pd.DataFrame(data_m.get("frontera", []))
 
-                # 3. Preparar datos de rendimiento
-                df_precios = pd.DataFrame(precios_dict)
-                df_ret = np.log(df_precios / df_precios.shift(1)).dropna()
-                
-                # ── Matriz de Correlación ──
-                st.markdown("#### 🔗 Matriz de correlación entre activos")
-                corr_df = df_ret.corr()
-                fig_corr = go.Figure(data=go.Heatmap(
-                    z=corr_df.values, x=corr_df.columns.tolist(), y=corr_df.index.tolist(),
-                    colorscale="RdBu", zmin=-1, zmax=1,
-                    text=corr_df.round(2).values, texttemplate="%{text}", textfont={"size": 11},
-                    colorbar=dict(title="Correlación"),
-                ))
-                try: fig_corr.update_layout(**plotly_layout("Correlación de rendimientos", height=350))
-                except: fig_corr.update_layout(title="Correlación", height=350, template="plotly_dark")
-                st.plotly_chart(fig_corr, use_container_width=True)
-                st.divider()
+        # Tasa FRED
+        rf_anual = 0.04
+        try:
+            curva = cached_get("/renta-fija/curva")
+            if curva and "datos_mercado" in curva:
+                rf_anual = curva["datos_mercado"]["tasas"][0] / 100
+        except: pass
 
-                # 4. SIMULACIÓN DE MONTE CARLO (Solo para pintar la nube visual)
-                mean_returns = df_ret.mean() * 252
-                cov_matrix = df_ret.cov() * 252
-                num_activos = len(tickers)
-                
-                resultados_sim = np.zeros((3, n_port))
-                
-                for i in range(n_port):
-                    # Lógica para permitir o no ventas en corto en la nube
-                    if permitir_cortos:
+        # ── Métricas Header ──
+        ms_retorno = opt["retorno_anual"]
+        ms_riesgo = opt["riesgo_anual"]
+        ms_sharpe = opt["sharpe_ratio"]
+
+        st.markdown("### ⭐ Portafolio Óptimo (Máximo Sharpe)")
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Retorno Esperado", f"{ms_retorno*100:.2f}%")
+        m2.metric("Riesgo (Volatilidad)", f"{ms_riesgo*100:.2f}%")
+        m3.metric("Sharpe Ratio", f"{ms_sharpe:.4f}")
+        m4.metric("Tasa Libre de Riesgo", f"{rf_anual*100:.2f}%", delta="FRED")
+
+        st.divider()
+
+        # ── Datos de rendimiento ──
+        df_precios = pd.DataFrame(precios_dict)
+        df_ret = np.log(df_precios / df_precios.shift(1)).dropna()
+
+        # ── Matriz de Correlación + Frontera (lado a lado) ──
+        col_corr, col_pie = st.columns([1, 1])
+
+        with col_corr:
+            st.markdown("#### 🔗 Matriz de Correlación")
+            corr_df = df_ret.corr()
+            fig_corr = go.Figure(data=go.Heatmap(
+                z=corr_df.values,
+                x=corr_df.columns.tolist(),
+                y=corr_df.index.tolist(),
+                colorscale="RdBu", zmin=-1, zmax=1,
+                text=corr_df.round(2).values,
+                texttemplate="%{text}",
+                textfont={"size": 11},
+                colorbar=dict(title="ρ"),
+            ))
+            try:
+                fig_corr.update_layout(**plotly_layout("Correlación entre activos", height=380))
+            except:
+                fig_corr.update_layout(title="Correlación", height=380)
+            st.plotly_chart(fig_corr, use_container_width=True)
+
+        with col_pie:
+            st.markdown("#### 🥧 Distribución Óptima")
+            df_ms = pd.DataFrame(list(opt["pesos"].items()), columns=["Ticker", "Peso"])
+            df_ms["Peso_pct"] = df_ms["Peso"] * 100
+            fig_pie = px.pie(df_ms, values="Peso_pct", names="Ticker", hole=0.4,
+                color_discrete_sequence=px.colors.qualitative.Set2)
+            fig_pie.update_traces(textposition='inside', textinfo='percent+label')
+            try:
+                fig_pie.update_layout(**plotly_layout("Pesos del Portafolio Óptimo", height=380))
+            except:
+                fig_pie.update_layout(title="Pesos", height=380)
+            st.plotly_chart(fig_pie, use_container_width=True)
+
+        st.divider()
+
+        # ── Simulación Monte Carlo ──
+        with st.spinner(f"Simulando {n_port:,} portafolios..."):
+            mean_returns = df_ret.mean() * 252
+            cov_matrix = df_ret.cov() * 252
+            num_activos = len(tickers)
+            resultados_sim = np.zeros((3, n_port))
+
+            for i in range(n_port):
+                if permitir_cortos:
+                    pesos = np.random.uniform(-1, 1.5, num_activos)
+                    while abs(np.sum(pesos)) < 0.1:
                         pesos = np.random.uniform(-1, 1.5, num_activos)
-                        # Evitar divisiones por cero o apalancamientos locos
-                        while abs(np.sum(pesos)) < 0.1:
-                            pesos = np.random.uniform(-1, 1.5, num_activos)
-                    else:
-                        pesos = np.random.random(num_activos)
-                        
-                    pesos /= np.sum(pesos)
-                    
-                    retorno_port = np.sum(mean_returns * pesos)
-                    std_port = np.sqrt(np.dot(pesos.T, np.dot(cov_matrix, pesos)))
-                    sharpe_port = (retorno_port - rf_anual) / std_port
-                    
-                    resultados_sim[0, i] = std_port
-                    resultados_sim[1, i] = retorno_port
-                    resultados_sim[2, i] = sharpe_port
+                else:
+                    pesos = np.random.random(num_activos)
+                pesos /= np.sum(pesos)
 
-                # 5. GRÁFICO INTEGRADO (Nube + Línea + Puntos exactos)
-                st.markdown("#### 📈 Frontera Eficiente y Conjunto Factible")
-                fig_mk = go.Figure()
+                retorno_port = np.sum(mean_returns * pesos)
+                std_port = np.sqrt(np.dot(pesos.T, np.dot(cov_matrix, pesos)))
+                sharpe_port = (retorno_port - rf_anual) / std_port if std_port > 0 else 0
 
-                # A. La nube generada aleatoriamente
-                fig_mk.add_trace(go.Scatter(
-                    x=resultados_sim[0] * 100, y=resultados_sim[1] * 100,
-                    mode="markers", name="Simulación",
-                    marker=dict(
-                        color=resultados_sim[2], colorscale="Plasma", 
-                        size=4, opacity=0.4, colorbar=dict(title="Sharpe"),
-                    ),
-                    hovertemplate="Riesgo: %{x:.2f}%<br>Retorno: %{y:.2f}%<br>Sharpe: %{marker.color:.4f}<extra></extra>"
+                resultados_sim[0, i] = std_port
+                resultados_sim[1, i] = retorno_port
+                resultados_sim[2, i] = sharpe_port
+
+        # ── Gráfico Frontera Eficiente ──
+        st.markdown("#### 📈 Frontera Eficiente — Conjunto de Portafolios Posibles")
+        fig_mk = go.Figure()
+
+        # Nube Monte Carlo
+        fig_mk.add_trace(go.Scatter(
+            x=resultados_sim[0] * 100, y=resultados_sim[1] * 100,
+            mode="markers", name=f"{n_port:,} simulaciones",
+            marker=dict(
+                color=resultados_sim[2], colorscale="Viridis",
+                size=4, opacity=0.5, colorbar=dict(title="Sharpe"),
+            ),
+            hovertemplate="Riesgo: %{x:.2f}%<br>Retorno: %{y:.2f}%<br>Sharpe: %{marker.color:.4f}<extra></extra>"
+        ))
+
+        # Frontera analítica
+        if not frontera.empty:
+            frontera_sorted = frontera.sort_values("riesgo")
+            fig_mk.add_trace(go.Scatter(
+                x=frontera_sorted["riesgo"] * 100,
+                y=frontera_sorted["retorno"] * 100,
+                mode="lines", name="Frontera Eficiente",
+                line=dict(color="#ED1E79", width=4),
+            ))
+
+            min_var_row = frontera_sorted.iloc[0]
+            fig_mk.add_trace(go.Scatter(
+                x=[min_var_row["riesgo"] * 100], y=[min_var_row["retorno"] * 100],
+                mode="markers+text", name="Mínima Varianza",
+                text=["💎 Mín. Varianza"], textposition="bottom right",
+                marker=dict(color="#38BDF8", size=14, symbol="diamond",
+                          line=dict(color="white", width=2)),
+            ))
+
+        # Máximo Sharpe
+        fig_mk.add_trace(go.Scatter(
+            x=[ms_riesgo * 100], y=[ms_retorno * 100],
+            mode="markers+text", name="Máximo Sharpe",
+            text=["⭐ Máx. Sharpe"], textposition="top left",
+            marker=dict(color="gold", size=20, symbol="star",
+                      line=dict(color="black", width=2)),
+        ))
+
+        try:
+            fig_mk.update_layout(**plotly_layout(
+                "Modelo de Markowitz", height=550,
+                xaxis_title="Volatilidad anualizada (%)",
+                yaxis_title="Rendimiento esperado (%)"
+            ))
+        except:
+            fig_mk.update_layout(title="Frontera de Markowitz", height=550)
+        st.plotly_chart(fig_mk, use_container_width=True)
+
+        st.divider()
+
+        # ── Distribución monetaria de la inversión ──
+        st.markdown("#### 💰 Distribución de la Inversión Óptima")
+        cols_inv = st.columns(len(opt["pesos"]))
+        for i, (t, w) in enumerate(opt["pesos"].items()):
+            monto = w * valor_portafolio
+            with cols_inv[i]:
+                if w < 0:
+                    st.metric(f"🔴 {t}", f"USD {monto:,.0f}",
+                            delta=f"Corto {w*100:.1f}%", delta_color="inverse")
+                else:
+                    st.metric(f"🟢 {t}", f"USD {monto:,.0f}",
+                            delta=f"{w*100:.1f}%")
+
+        st.divider()
+
+        # ── Comparación con/sin cortos ──
+        st.markdown("#### 📊 Costo de la Restricción de No-Negatividad")
+        cache_key_cortos = f"markowitz_cortos_{'-'.join(tickers)}"
+        if cache_key_cortos not in st.session_state:
+            with st.spinner("Calculando frontera con cortos..."):
+                resultado_cortos = api_get("/analisis/markowitz", params={"permitir_cortos": True})
+                if resultado_cortos:
+                    st.session_state[cache_key_cortos] = resultado_cortos
+
+        data_cortos = st.session_state.get(cache_key_cortos)
+
+        if data_cortos:
+            frontera_cortos = pd.DataFrame(data_cortos.get("frontera", []))
+            fig_comp = go.Figure()
+
+            if not frontera.empty:
+                fig_comp.add_trace(go.Scatter(
+                    x=frontera.sort_values("riesgo")["riesgo"] * 100,
+                    y=frontera.sort_values("riesgo")["retorno"] * 100,
+                    mode="lines", name="Sin cortos (wi ≥ 0)",
+                    line=dict(color="#10b981", width=3),
                 ))
-
-                # B. La Línea Exacta (Calculada por tu backend)
-                if not frontera.empty:
-                    frontera_sorted = frontera.sort_values("riesgo")
-                    fig_mk.add_trace(go.Scatter(
-                        x=frontera_sorted["riesgo"] * 100,
-                        y=frontera_sorted["retorno"] * 100,
-                        mode="lines", name="Frontera Analítica",
-                        line=dict(color="#ED1E79", width=4),
-                    ))
-                    
-                    # Extraemos Mínima Varianza directo de la línea
-                    min_var_row = frontera_sorted.iloc[0]
-                    fig_mk.add_trace(go.Scatter(
-                        x=[min_var_row["riesgo"] * 100], y=[min_var_row["retorno"] * 100],
-                        mode="markers+text", name="Mín. Varianza 🔵",
-                        text=["Mín. Varianza"], textposition="bottom right",
-                        marker=dict(color="#38BDF8", size=12, symbol="diamond", line=dict(color="white", width=1)),
-                    ))
-
-                # C. El Óptimo Exacto (Calculado por tu backend)
-                ms_retorno = opt["retorno_anual"]
-                ms_riesgo = opt["riesgo_anual"]
-                ms_sharpe = opt["sharpe_ratio"]
-                
-                fig_mk.add_trace(go.Scatter(
-                    x=[ms_riesgo * 100], y=[ms_retorno * 100],
-                    mode="markers+text", name="Máx. Sharpe ⭐",
-                    text=["Máx. Sharpe"], textposition="top left",
-                    marker=dict(color="gold", size=17, symbol="star", line=dict(color="black", width=1)),
+            if not frontera_cortos.empty:
+                fc = frontera_cortos.sort_values("riesgo")
+                fig_comp.add_trace(go.Scatter(
+                    x=fc["riesgo"] * 100, y=fc["retorno"] * 100,
+                    mode="lines", name="Con cortos (wi ∈ ℝ)",
+                    line=dict(color="#f59e0b", width=3, dash="dash"),
                 ))
+            try:
+                fig_comp.update_layout(**plotly_layout(
+                    "Comparación de Fronteras", height=400,
+                    xaxis_title="Volatilidad (%)",
+                    yaxis_title="Retorno (%)"))
+            except:
+                fig_comp.update_layout(title="Comparación", height=400)
+            st.plotly_chart(fig_comp, use_container_width=True)
 
-                try:
-                    fig_mk.update_layout(**plotly_layout(
-                        "Modelo de Markowitz", height=550,
-                        xaxis_title="Volatilidad anualizada (%)", yaxis_title="Rendimiento esperado (%)"
-                    ))
-                except:
-                    fig_mk.update_layout(title="Frontera de Markowitz", height=550, template="plotly_dark")
-                st.plotly_chart(fig_mk, use_container_width=True)
-
-                # 6. MÉTRICAS FINALES
-                col_ms, col_mv = st.columns(2)
-
-                with col_ms:
-                    st.markdown("#### ⭐ Portafolio Máximo Sharpe")
-                    st.metric("Retorno | Riesgo", f"{ms_retorno*100:.2f}% | {ms_riesgo*100:.2f}%")
-                    st.metric("Sharpe Ratio", f"{ms_sharpe:.4f}")
-                    df_ms = pd.DataFrame(list(opt["pesos"].items()), columns=["Ticker", "Peso"])
-                    fig_pie_ms = px.pie(df_ms, values="Peso", names="Ticker", hole=0.3)
-                    try: fig_pie_ms.update_layout(**plotly_layout(height=320))
-                    except: fig_pie_ms.update_layout(height=320, template="plotly_dark")
-                    st.plotly_chart(fig_pie_ms, use_container_width=True)
-
-                with col_mv:
-                    st.markdown("#### 💰 Distribución de la inversión (Máx. Sharpe)")
-                    st.info("Valores calculados analíticamente.")
-                    for t, w in opt["pesos"].items():
-                        # Si es venta en corto, el peso es negativo
-                        signo = "" if w >= 0 else "🔴 Corto "
-                        st.write(f"**{t}:** {w*100:.1f}% → **{signo}${w*valor_portafolio:,.0f}**")
-
-                # ── Comparación fronteras con/sin cortos ──
-                st.divider()
-                st.markdown("#### 📊 Comparación: Con vs Sin No-Negatividad")
-                with st.spinner("Calculando frontera con cortos..."):
-                    data_cortos = api_get("/analisis/markowitz", params={"permitir_cortos": True})
-
-                if data_cortos:
-                    frontera_cortos = pd.DataFrame(data_cortos.get("frontera", []))
-                    fig_comp = go.Figure()
-
-                    if not frontera.empty:
-                        fig_comp.add_trace(go.Scatter(
-                            x=frontera.sort_values("riesgo")["riesgo"] * 100,
-                            y=frontera.sort_values("riesgo")["retorno"] * 100,
-                            mode="lines", name="Sin cortos (wi ≥ 0)",
-                            line=dict(color="#10b981", width=3),
-                        ))
-                    if not frontera_cortos.empty:
-                        fc = pd.DataFrame(frontera_cortos).sort_values("riesgo")
-                        fig_comp.add_trace(go.Scatter(
-                            x=fc["riesgo"] * 100, y=fc["retorno"] * 100,
-                            mode="lines", name="Con cortos (wi ∈ ℝ)",
-                            line=dict(color="#f59e0b", width=3, dash="dash"),
-                        ))
-                    try:
-                        fig_comp.update_layout(**plotly_layout(
-                            "Costo de la restricción de no negatividad", height=400,
-                            xaxis_title="Volatilidad (%)", yaxis_title="Retorno (%)"))
-                    except:
-                        fig_comp.update_layout(title="Comparación fronteras", height=400)
-                    st.plotly_chart(fig_comp, use_container_width=True)
-                    
-                    with st.expander("ℹ️ Interpretación"):
-                        st.markdown("""
-                        - **Sin cortos:** solo posiciones largas. Más conservador, menor universo factible.
-                        - **Con cortos:** pesos negativos permitidos. Mayor flexibilidad, frontera más alta.
-                        - El **costo de la restricción** es la diferencia vertical entre ambas fronteras.
-                        """)
-
-            else:
-                st.error("⚠️ El backend no logró calcular la frontera eficiente. Verifica los logs de FastAPI.")
+        with st.expander("ℹ️ Interpretación del Modelo de Markowitz"):
+            st.markdown(f"""
+            - **Frontera Eficiente (línea rosa):** todas las combinaciones óptimas de activos. Cualquier portafolio por debajo es subóptimo.
+            - **Mínima Varianza 💎:** el portafolio con menor riesgo posible, ideal para inversores conservadores.
+            - **Máximo Sharpe ⭐:** el portafolio con mejor relación riesgo-retorno ajustada por la tasa libre de riesgo ({rf_anual*100:.2f}%).
+            - **Sin cortos:** solo posiciones largas (compra). Más conservador.
+            - **Con cortos:** permite vender activos prestados. Mayor flexibilidad pero más riesgo.
+            - El **costo de la restricción** es la diferencia vertical entre ambas fronteras.
+            """)
 
 # ═══════════════════ TAB 7 — SEÑALES Y SEMÁFOROS ═══════════════════
 
