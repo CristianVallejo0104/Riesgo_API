@@ -320,10 +320,23 @@ with tabs[1]:
 with tabs[2]:
     st.subheader("📉 Rendimientos y Propiedades Empíricas")
     ticker_r = st.selectbox("Seleccione un activo", tickers, key="m2_ticker")
+    for _t in tickers:
+        _key = f"rend_{_t}"
+        if _key not in st.session_state:
+            _data = {
+                "stats": api_get(f"/analisis/rendimientos/{_t}"),
+                "serie": api_get(f"/analisis/rendimientos-serie/{_t}")
 
-    with st.spinner("Calculando métricas y procesando series de tiempo..."):
-        data_stats = cached_get(f"/analisis/rendimientos/{ticker_r}")
-        data_serie = cached_get(f"/analisis/rendimientos-serie/{ticker_r}")
+            }
+            if _data["stats"] and _data["serie"]:
+                st.session_state[_key]=_data
+
+    cache_key_m2 = f"rend_{ticker_r}"
+    if cache_key_m2 not in st.session_state: 
+        st.info("⏳ Cargando datos...")
+    else:
+        data_stats = st.session_state[cache_key_m2]["stats"]   # ✅
+        data_serie = st.session_state[cache_key_m2]["serie"])
 
     if data_stats and data_serie:
         df_r = pd.DataFrame(data_serie["serie"])
