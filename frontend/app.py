@@ -336,137 +336,137 @@ with tabs[2]:
         st.info("⏳ Cargando datos...")
     else:
         data_stats = st.session_state[cache_key_m2]["stats"]   # ✅
-        data_serie = st.session_state[cache_key_m2]["serie"])
+        data_serie = st.session_state[cache_key_m2]["serie"]
 
-    if data_stats and data_serie:
-        df_r = pd.DataFrame(data_serie["serie"])
-        df_r["fecha"] = pd.to_datetime(df_r["fecha"])
-        df_r.set_index("fecha", inplace=True)
-        rend_vals = df_r["rendimiento"] * 100
-        
-        # ── 1. Métricas Principales (Fusión de ambos proyectos) ────────────────
-        c1, c2, c3, c4, c5 = st.columns(5)
-        c1.metric("Media Diaria", f"{data_stats['media_diaria']*100:.4f}%")
-        c2.metric("Volatilidad Diaria", f"{data_stats['std_diaria']*100:.4f}%")
-        c3.metric("Asimetría (Skew)", f"{data_stats['asimetria']:.3f}")
-        c4.metric("Curtosis", f"{data_stats['curtosis']:.3f}")
-        # Percentil 5% (Cálculo local para complementar)
-        p5_val = rend_vals.quantile(0.05) / 100
-        c5.metric("Peor día (5%)", f"{p5_val*100:.2f}%")
-
-        st.markdown("---")
-
-        # ── 2. Visualización de Series y Distribución ──────────────────────────
-        col_a, col_b = st.columns(2)
-
-        with col_a:
-            # Serie de rendimientos log (Estilo área del proyecto anterior)
-            fig_rend = go.Figure()
-            fig_rend.add_trace(go.Scatter(
-                x=df_r.index, y=df_r["rendimiento"]*100,
-                name="Rend. log diario", 
-                line=dict(color="#A78BFA", width=0.8),
-                fill="tozeroy", 
-                fillcolor="rgba(167,139,250,0.1)",
-            ))
-            try:
-                fig_rend.update_layout(**plotly_layout("Serie de rendimientos log diarios (%)", height=350))
-            except:
-                fig_rend.update_layout(title="Rendimientos diarios (%)", height=350, template="plotly_dark")
-            st.plotly_chart(fig_rend, use_container_width=True)
-
-        with col_b:
-            # Histograma vs Normal
-            mu, sigma = rend_vals.mean(), rend_vals.std()
-            x_norm = np.linspace(rend_vals.min(), rend_vals.max(), 200)
-            # Curva normal teórica
-            y_norm = (1 / (sigma * np.sqrt(2 * np.pi))) * np.exp(-0.5 * ((x_norm - mu) / sigma) ** 2)
-
-            fig_hist = go.Figure()
-            fig_hist.add_trace(go.Histogram(
-                x=rend_vals, nbinsx=60, name="Distribución Real",
-                histnorm="probability density",
-                marker_color="#f43f5e", opacity=0.6,
-            ))
-            fig_hist.add_trace(go.Scatter(
-                x=x_norm, y=y_norm, name="Normal Teórica",
-                line=dict(color="#3b82f6", width=2),
-            ))
-            try:
-                fig_hist.update_layout(**plotly_layout("Histograma vs Normal Teórica", height=350))
-            except:
-                fig_hist.update_layout(title="Distribución", height=350, template="plotly_dark")
-            st.plotly_chart(fig_hist, use_container_width=True)
-
-        # ── 3. Análisis de Colas y Comparativa ────────────────────────────────
-        col_c, col_d = st.columns(2)
-
-        with col_c:
-            # Q-Q Plot (Mejorado estadísticamente)
-            rend_sorted = np.sort(df_r["rendimiento"].dropna())
-            # Cuantiles teóricos usando scipy
-            from scipy import stats as sp_stats
-            cuantiles_teo = sp_stats.norm.ppf(np.linspace(0.01, 0.99, len(rend_sorted)), loc=df_r["rendimiento"].mean(), scale=df_r["rendimiento"].std())
+        if data_stats and data_serie:
+            df_r = pd.DataFrame(data_serie["serie"])
+            df_r["fecha"] = pd.to_datetime(df_r["fecha"])
+            df_r.set_index("fecha", inplace=True)
+            rend_vals = df_r["rendimiento"] * 100
             
-            fig_qq = go.Figure()
-            fig_qq.add_trace(go.Scatter(
-                x=cuantiles_teo, y=rend_sorted,
-                mode="markers", name="Datos Observados",
-                marker=dict(color="#A5B4FC", size=4, opacity=0.7),
-            ))
-            fig_qq.add_trace(go.Scatter(
-                x=[min(cuantiles_teo), max(cuantiles_teo)],
-                y=[min(cuantiles_teo), max(cuantiles_teo)],
-                name="Línea 45°", line=dict(color="#ef4444", dash="dash"),
-            ))
-            try:
-                fig_qq.update_layout(**plotly_layout("Q-Q Plot vs Normalidad", height=350, xaxis_title="Cuantiles Teóricos", yaxis_title="Cuantiles Observados"))
-            except:
-                fig_qq.update_layout(title="Q-Q Plot", height=350, template="plotly_dark")
-            st.plotly_chart(fig_qq, use_container_width=True)
+            # ── 1. Métricas Principales (Fusión de ambos proyectos) ────────────────
+            c1, c2, c3, c4, c5 = st.columns(5)
+            c1.metric("Media Diaria", f"{data_stats['media_diaria']*100:.4f}%")
+            c2.metric("Volatilidad Diaria", f"{data_stats['std_diaria']*100:.4f}%")
+            c3.metric("Asimetría (Skew)", f"{data_stats['asimetria']:.3f}")
+            c4.metric("Curtosis", f"{data_stats['curtosis']:.3f}")
+            # Percentil 5% (Cálculo local para complementar)
+            p5_val = rend_vals.quantile(0.05) / 100
+            c5.metric("Peor día (5%)", f"{p5_val*100:.2f}%")
 
-        with col_d:
-            # Boxplot Comparativo (Top 5 activos del portafolio)
-            fig_box = go.Figure()
-            for t in tickers[:5]:
-                serie_box = cached_get(f"/analisis/rendimientos-serie/{t}")
-                if serie_box:
-                    r_log = pd.Series([x["rendimiento"] for x in serie_box["serie"]]) * 100
-                    fig_box.add_trace(go.Box(y=r_log, name=t, boxpoints="outliers", marker_size=2))
-            try:
-                fig_box.update_layout(**plotly_layout("Comparativa de Volatilidad (Boxplot %)", height=350))
-            except:
-                fig_box.update_layout(title="Boxplot", height=350, template="plotly_dark")
-            st.plotly_chart(fig_box, use_container_width=True)
+            st.markdown("---")
 
-        # ── 4. Pruebas de Normalidad y Conclusión ────────────────────────────
-        st.markdown("#### ⚖️ Pruebas de Normalidad Formales")
-        jb, sw = data_stats["jarque_bera"], data_stats["shapiro_wilk"]
-        
-        ce1, ce2, ce3 = st.columns(3)
-        ce1.metric(
-            "Jarque-Bera (p-valor)", f"{jb['p_value']:.6f}",
-            delta="Normal ✅" if jb["es_normal"] else "No normal ⚠️",
-            delta_color="normal" if jb["es_normal"] else "inverse"
-        )
-        ce2.metric(
-            "Shapiro-Wilk (p-valor)", f"{sw['p_value']:.6f}",
-            delta="Normal ✅" if sw["es_normal"] else "No normal ⚠️",
-            delta_color="normal" if sw["es_normal"] else "inverse"
-        )
-        ce3.metric(
-            "Conclusión Estadística", 
-            "✅ Distribución Normal" if jb["es_normal"] and sw["es_normal"] else "⚠️ Evidencia de Colas Pesadas"
-        )
+            # ── 2. Visualización de Series y Distribución ──────────────────────────
+            col_a, col_b = st.columns(2)
 
-        with st.expander("ℹ️ Hechos Estilizados de los Rendimientos"):
-            st.markdown(f"""
-            Al analizar **{ticker_r}**, observamos las propiedades típicas de las series financieras:
-            - **Exceso de Curtosis:** Con una curtosis de **{data_stats['curtosis']:.2f}**, el activo presenta colas más anchas que una normal (leptocurtosis).
-            - **Asimetría:** El valor de **{data_stats['asimetria']:.2f}** indica si el activo tiende a presentar caídas más extremas que subidas.
-            - **Agrupamiento de Volatilidad:** Nota en la serie de tiempo cómo los picos de varianza suelen ocurrir en grupos.
-            - **Impacto en el Riesgo:** La falla en las pruebas de Jarque-Bera y Shapiro-Wilk justifica el uso de modelos como **GARCH** para la volatilidad y **VaR Histórico** para el riesgo.
-            """)
+            with col_a:
+                # Serie de rendimientos log (Estilo área del proyecto anterior)
+                fig_rend = go.Figure()
+                fig_rend.add_trace(go.Scatter(
+                    x=df_r.index, y=df_r["rendimiento"]*100,
+                    name="Rend. log diario", 
+                    line=dict(color="#A78BFA", width=0.8),
+                    fill="tozeroy", 
+                    fillcolor="rgba(167,139,250,0.1)",
+                ))
+                try:
+                    fig_rend.update_layout(**plotly_layout("Serie de rendimientos log diarios (%)", height=350))
+                except:
+                    fig_rend.update_layout(title="Rendimientos diarios (%)", height=350, template="plotly_dark")
+                st.plotly_chart(fig_rend, use_container_width=True)
+
+            with col_b:
+                # Histograma vs Normal
+                mu, sigma = rend_vals.mean(), rend_vals.std()
+                x_norm = np.linspace(rend_vals.min(), rend_vals.max(), 200)
+                # Curva normal teórica
+                y_norm = (1 / (sigma * np.sqrt(2 * np.pi))) * np.exp(-0.5 * ((x_norm - mu) / sigma) ** 2)
+
+                fig_hist = go.Figure()
+                fig_hist.add_trace(go.Histogram(
+                    x=rend_vals, nbinsx=60, name="Distribución Real",
+                    histnorm="probability density",
+                    marker_color="#f43f5e", opacity=0.6,
+                ))
+                fig_hist.add_trace(go.Scatter(
+                    x=x_norm, y=y_norm, name="Normal Teórica",
+                    line=dict(color="#3b82f6", width=2),
+                ))
+                try:
+                    fig_hist.update_layout(**plotly_layout("Histograma vs Normal Teórica", height=350))
+                except:
+                    fig_hist.update_layout(title="Distribución", height=350, template="plotly_dark")
+                st.plotly_chart(fig_hist, use_container_width=True)
+
+            # ── 3. Análisis de Colas y Comparativa ────────────────────────────────
+            col_c, col_d = st.columns(2)
+
+            with col_c:
+                # Q-Q Plot (Mejorado estadísticamente)
+                rend_sorted = np.sort(df_r["rendimiento"].dropna())
+                # Cuantiles teóricos usando scipy
+                from scipy import stats as sp_stats
+                cuantiles_teo = sp_stats.norm.ppf(np.linspace(0.01, 0.99, len(rend_sorted)), loc=df_r["rendimiento"].mean(), scale=df_r["rendimiento"].std())
+                
+                fig_qq = go.Figure()
+                fig_qq.add_trace(go.Scatter(
+                    x=cuantiles_teo, y=rend_sorted,
+                    mode="markers", name="Datos Observados",
+                    marker=dict(color="#A5B4FC", size=4, opacity=0.7),
+                ))
+                fig_qq.add_trace(go.Scatter(
+                    x=[min(cuantiles_teo), max(cuantiles_teo)],
+                    y=[min(cuantiles_teo), max(cuantiles_teo)],
+                    name="Línea 45°", line=dict(color="#ef4444", dash="dash"),
+                ))
+                try:
+                    fig_qq.update_layout(**plotly_layout("Q-Q Plot vs Normalidad", height=350, xaxis_title="Cuantiles Teóricos", yaxis_title="Cuantiles Observados"))
+                except:
+                    fig_qq.update_layout(title="Q-Q Plot", height=350, template="plotly_dark")
+                st.plotly_chart(fig_qq, use_container_width=True)
+
+            with col_d:
+                # Boxplot Comparativo (Top 5 activos del portafolio)
+                fig_box = go.Figure()
+                for t in tickers[:5]:
+                    serie_box = cached_get(f"/analisis/rendimientos-serie/{t}")
+                    if serie_box:
+                        r_log = pd.Series([x["rendimiento"] for x in serie_box["serie"]]) * 100
+                        fig_box.add_trace(go.Box(y=r_log, name=t, boxpoints="outliers", marker_size=2))
+                try:
+                    fig_box.update_layout(**plotly_layout("Comparativa de Volatilidad (Boxplot %)", height=350))
+                except:
+                    fig_box.update_layout(title="Boxplot", height=350, template="plotly_dark")
+                st.plotly_chart(fig_box, use_container_width=True)
+
+            # ── 4. Pruebas de Normalidad y Conclusión ────────────────────────────
+            st.markdown("#### ⚖️ Pruebas de Normalidad Formales")
+            jb, sw = data_stats["jarque_bera"], data_stats["shapiro_wilk"]
+            
+            ce1, ce2, ce3 = st.columns(3)
+            ce1.metric(
+                "Jarque-Bera (p-valor)", f"{jb['p_value']:.6f}",
+                delta="Normal ✅" if jb["es_normal"] else "No normal ⚠️",
+                delta_color="normal" if jb["es_normal"] else "inverse"
+            )
+            ce2.metric(
+                "Shapiro-Wilk (p-valor)", f"{sw['p_value']:.6f}",
+                delta="Normal ✅" if sw["es_normal"] else "No normal ⚠️",
+                delta_color="normal" if sw["es_normal"] else "inverse"
+            )
+            ce3.metric(
+                "Conclusión Estadística", 
+                "✅ Distribución Normal" if jb["es_normal"] and sw["es_normal"] else "⚠️ Evidencia de Colas Pesadas"
+            )
+
+            with st.expander("ℹ️ Hechos Estilizados de los Rendimientos"):
+                st.markdown(f"""
+                Al analizar **{ticker_r}**, observamos las propiedades típicas de las series financieras:
+                - **Exceso de Curtosis:** Con una curtosis de **{data_stats['curtosis']:.2f}**, el activo presenta colas más anchas que una normal (leptocurtosis).
+                - **Asimetría:** El valor de **{data_stats['asimetria']:.2f}** indica si el activo tiende a presentar caídas más extremas que subidas.
+                - **Agrupamiento de Volatilidad:** Nota en la serie de tiempo cómo los picos de varianza suelen ocurrir en grupos.
+                - **Impacto en el Riesgo:** La falla en las pruebas de Jarque-Bera y Shapiro-Wilk justifica el uso de modelos como **GARCH** para la volatilidad y **VaR Histórico** para el riesgo.
+                """)
 
 # ═══════════════════ MÓD 3 — VOLATILIDAD ═══════════════════
 
