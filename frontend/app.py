@@ -564,29 +564,32 @@ with tabs[3]:
 # ═══════════════════ MÓD 4 — CAPM ═══════════════════
 
 with tabs[4]:
-    st.subheader("🎯 CAPM — Capital Asset Pricing Model")
-    st.info("El CAPM determina el rendimiento esperado de un activo basado en su riesgo sistemático (Beta) frente al mercado.")
+        st.subheader("🎯 CAPM — Capital Asset Pricing Model")
+        st.info("El CAPM determina el rendimiento esperado de un activo basado en su riesgo sistemático (Beta) frente al mercado.")
 
-    cache_key_m4 = f"capm_{'-'.join(tickers)}_{benchmark}"
-    if cache_key_m4 not in st.session_state:
-        with st.spinner("Consultando FRED y calculando CAPM..."):
-            descargar_si_no_existe(benchmark)
-            rf_real = 0.04
-            try:
-                curva = api_get("/renta-fija/curva")
-                if curva and "datos_mercado" in curva and "tasas" in curva["datos_mercado"]:
-                    rf_real = curva["datos_mercado"]["tasas"][0] / 100
-            except:
-                pass
-            st.session_state[cache_key_m4] = api_get("/analisis/capm", params={
-                "tickers": tickers,
-                "benchmark": benchmark,
-                "tasa_libre_riesgo": rf_real
-            })
+        cache_key_m4 = f"capm_{'-'.join(tickers)}_{benchmark}"
+        if cache_key_m4 not in st.session_state:
+            with st.spinner("Consultando FRED y calculando CAPM..."):
+                descargar_si_no_existe(benchmark)
+                rf_real = 0.04
+                try:
+                    curva = api_get("/renta-fija/curva")
+                    if curva and "datos_mercado" in curva and "tasas" in curva["datos_mercado"]:
+                        rf_real = curva["datos_mercado"]["tasas"][0] / 100
+                except:
+                    pass
+                resultado = api_get("/analisis/capm", params={
+                    "tickers": tickers,
+                    "benchmark": benchmark,
+                    "tasa_libre_riesgo": rf_real
+                })
+                if resultado:
+                    st.session_state[cache_key_m4] = resultado
         data_capm = st.session_state.get(cache_key_m4)
+        if not data_capm:
+            st.info("⏳ Ve primero al **Tab 1 — Técnico** para cargar los datos del portafolio.")
+        elif data_capm and "activos" in data_capm:
 
-        
-        if data_capm and "activos" in data_capm:
             rf_val = data_capm['activos'][0]['tasa_libre_riesgo_anual']
             st.success(f"✅ Tasa Libre de Riesgo (FRED): **{rf_val * 100:.2f}%** | Benchmark: **{data_capm['benchmark']}**")
 
