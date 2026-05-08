@@ -1696,10 +1696,14 @@ with tabs[13]:
 
             with st.chat_message("assistant"):
                 with st.spinner("🤖 Pensando..."):
-                    resp = api_post("/agente/chat", {
-                        "pregunta": pregunta,
-                        "contexto": contexto_port,
-                    })
+                    try:
+                        r = requests.post(f"{API}/agente/chat", 
+                            json={"pregunta": pregunta, "contexto": contexto_port}, 
+                            timeout=600)
+                        resp = r.json() if r.status_code == 200 else None
+                    except Exception as e:
+                        st.error(f"❌ {e}")
+                        resp = None
                 if resp:
                     st.markdown(resp["respuesta"])
                     st.session_state.chat_history.append({
