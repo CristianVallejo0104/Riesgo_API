@@ -237,13 +237,16 @@ with tabs[0]:
 with tabs[1]:
     st.subheader("📈 Análisis Técnico e Indicadores")
 
-    # Descargar todos los tickers
-    with st.spinner("Descargando precios de todos los activos..."):
-        for t in tickers:
-            descargar_si_no_existe(t)
-        descargar_si_no_existe(benchmark)
-    # Comparación de todos
-    st.markdown("### Rendimiento comparado — Todos los activos (Base 100)")
+    # Descarga inicial
+    if f"tab1_descargado_{'_'.join(tickers)}" not in st.session_state:
+        with st.spinner("Descargando precios de todos los activos..."):
+            for t in tickers:
+                descargar_si_no_existe(t)
+            descargar_si_no_existe(benchmark)
+        st.session_state[f"tab1_descargado_{'_'.join(tickers)}"] = True
+
+    # Gráfico comparativo base 100
+    st.markdown("### 📊 Rendimiento Comparado — Base 100")
     fig_comp = go.Figure()
     for t in tickers:
         r_p = cached_get(f"/precios/{t}")
@@ -252,70 +255,77 @@ with tabs[1]:
             df_t["fecha"] = pd.to_datetime(df_t["fecha"])
             df_t["norm"] = df_t["close"] / df_t["close"].iloc[0] * 100
             fig_comp.add_trace(go.Scatter(x=df_t["fecha"], y=df_t["norm"], name=t))
-    fig_comp.update_layout(height=400, legend=dict(orientation="h", yanchor="bottom", y=1.02),
-                           yaxis_title="Valor (base 100)")
+    fig_comp.update_layout(height=400,
+        legend=dict(orientation="h", yanchor="bottom", y=1.02),
+        yaxis_title="Valor (base 100)")
     st.plotly_chart(fig_comp, use_container_width=True)
 
     st.divider()
-    st.markdown(f"### Análisis individual — {ticker_sel}")
+    st.markdown("### 🕯️ Análisis Individual por Activo")
 
-    # Velas japonesas
-    r_precios = cached_get(f"/precios/{ticker_sel}")
-    if r_precios and len(r_precios) > 0:
-        df_p = pd.DataFrame(r_precios)
-        df_p["fecha"] = pd.to_datetime(df_p["fecha"])
-        fig_velas = go.Figure(data=go.Candlestick(
-            x=df_p["fecha"], open=df_p["open"], high=df_p["high"],
-            low=df_p["low"], close=df_p["close"]))
-        fig_velas.update_layout(title=f"Velas Japonesas — {ticker_sel}",
-                                 xaxis_rangeslider_visible=False, height=400)
-        st.plotly_chart(fig_velas, use_container_width=True)
+    for idx, t in enumerate(tickers):
+        data_ind = cached_get(f"/analisis/indicadores/{t}")
+        r_precios = cached_get(f"/precios/{t}")
 
-    # Indicadores
-    data_ind = cached_get(f"/analisis/indicadores/{ticker_sel}")
-    if data_ind:
-        df = pd.DataFrame(data_ind["indicadores"]).T
-        df.index = pd.to_datetime(df.index)
+        with st.expander(f"📈 {t} — Velas e Indicadores Técnicos", expanded=(idx == 0)):
+            if r_precios and len(r_precios) > 0:
+                df_p = pd.DataFrame(r_precios)
+                df_p["fecha"] = pd.to_datetime(df_p["fecha"])
+                fig_velas = go.Figure(data=go.Candlestick(
+                    x=df_p["fecha"], open=df_p["open"], high=df_p["high"],
+                    low=df_p["low"], close=df_p["close"]))
+                fig_velas.update_layout(
+                    title=f"Velas Japonesas — {t}",
+                    xaxis_rangeslider_visible=False, height=350)
+                st.plotly_chart(fig_velas, use_container_width=True)
 
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(x=df.index, y=df["close"], name="Precio", line=dict(width=2)))
-        fig.add_trace(go.Scatter(x=df.index, y=df["sma_short"], name="SMA 20", line=dict(dash="dot")))
-        fig.add_trace(go.Scatter(x=df.index, y=df["sma_long"], name="SMA 50", line=dict(dash="dash")))
-        fig.add_trace(go.Scatter(x=df.index, y=df["bollinger_upper"], name="BB Sup",
-                                  line=dict(color="rgba(100,100,200,0.5)")))
-        fig.add_trace(go.Scatter(x=df.index, y=df["bollinger_lower"], name="BB Inf",
-                                  line=dict(color="rgba(100,100,200,0.5)"),
-                                  fill="tonexty", fillcolor="rgba(100,100,200,0.07)"))
-        fig.update_layout(title=f"Indicadores — {ticker_sel}", height=420,
-                          legend=dict(orientation="h", yanchor="bottom", y=1.02))
-        st.plotly_chart(fig, use_container_width=True)
+            if data_ind:
+                df = pd.DataFrame(data_ind["indicadores"]).T
+                df.index = pd.to_datetime(df.index)
 
-        col1, col2 = st.columns(2)
-        with col1:
-            fig_rsi = go.Figure()
-            fig_rsi.add_trace(go.Scatter(x=df.index, y=df["rsi"], name="RSI", line=dict(color="#6366F1", width=2)))
-            fig_rsi.add_hline(y=70, line_dash="dash", line_color="red", annotation_text="Sobrecompra")
-            fig_rsi.add_hline(y=30, line_dash="dash", line_color="green", annotation_text="Sobreventa")
-            fig_rsi.update_layout(title="RSI (14)", height=250, yaxis=dict(range=[0, 100]))
-            st.plotly_chart(fig_rsi, use_container_width=True)
-        with col2:
-            fig_macd = go.Figure()
-            fig_macd.add_trace(go.Scatter(x=df.index, y=df["macd"], name="MACD"))
-            fig_macd.add_trace(go.Scatter(x=df.index, y=df["macd_signal"], name="Señal"))
-            colors = ["green" if v >= 0 else "red" for v in df["macd_histograma"].fillna(0)]
-            fig_macd.add_trace(go.Bar(x=df.index, y=df["macd_histograma"], marker_color=colors, opacity=0.6, name="Hist"))
-            fig_macd.update_layout(title="MACD", height=250)
-            st.plotly_chart(fig_macd, use_container_width=True)
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(x=df.index, y=df["close"], name="Precio", line=dict(width=2)))
+                fig.add_trace(go.Scatter(x=df.index, y=df["sma_short"], name="SMA 20", line=dict(dash="dot")))
+                fig.add_trace(go.Scatter(x=df.index, y=df["sma_long"], name="SMA 50", line=dict(dash="dash")))
+                fig.add_trace(go.Scatter(x=df.index, y=df["bollinger_upper"], name="BB Sup",
+                    line=dict(color="rgba(100,100,200,0.5)")))
+                fig.add_trace(go.Scatter(x=df.index, y=df["bollinger_lower"], name="BB Inf",
+                    line=dict(color="rgba(100,100,200,0.5)"),
+                    fill="tonexty", fillcolor="rgba(100,100,200,0.07)"))
+                fig.update_layout(title=f"Indicadores — {t}", height=380,
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02))
+                st.plotly_chart(fig, use_container_width=True)
 
-        fig_stoch = go.Figure()
-        fig_stoch.add_trace(go.Scatter(x=df.index, y=df["stochastic_k"], name="%K"))
-        fig_stoch.add_trace(go.Scatter(x=df.index, y=df["stochastic_d"], name="%D"))
-        fig_stoch.add_hline(y=80, line_dash="dash", line_color="red")
-        fig_stoch.add_hline(y=20, line_dash="dash", line_color="green")
-        fig_stoch.update_layout(title="Estocástico", height=250, yaxis=dict(range=[0, 100]))
-        st.plotly_chart(fig_stoch, use_container_width=True)
+                col1, col2 = st.columns(2)
+                with col1:
+                    fig_rsi = go.Figure()
+                    fig_rsi.add_trace(go.Scatter(x=df.index, y=df["rsi"],
+                        name="RSI", line=dict(color="#6366F1", width=2)))
+                    fig_rsi.add_hline(y=70, line_dash="dash", line_color="red", annotation_text="Sobrecompra")
+                    fig_rsi.add_hline(y=30, line_dash="dash", line_color="green", annotation_text="Sobreventa")
+                    fig_rsi.update_layout(title="RSI (14)", height=250, yaxis=dict(range=[0, 100]))
+                    st.plotly_chart(fig_rsi, use_container_width=True)
 
-        with st.expander("ℹ️ Interpretación de indicadores"):
+                with col2:
+                    fig_macd = go.Figure()
+                    fig_macd.add_trace(go.Scatter(x=df.index, y=df["macd"], name="MACD"))
+                    fig_macd.add_trace(go.Scatter(x=df.index, y=df["macd_signal"], name="Señal"))
+                    colors = ["green" if v >= 0 else "red" for v in df["macd_histograma"].fillna(0)]
+                    fig_macd.add_trace(go.Bar(x=df.index, y=df["macd_histograma"],
+                        marker_color=colors, opacity=0.6, name="Hist"))
+                    fig_macd.update_layout(title="MACD", height=250)
+                    st.plotly_chart(fig_macd, use_container_width=True)
+
+                fig_stoch = go.Figure()
+                fig_stoch.add_trace(go.Scatter(x=df.index, y=df["stochastic_k"], name="%K"))
+                fig_stoch.add_trace(go.Scatter(x=df.index, y=df["stochastic_d"], name="%D"))
+                fig_stoch.add_hline(y=80, line_dash="dash", line_color="red")
+                fig_stoch.add_hline(y=20, line_dash="dash", line_color="green")
+                fig_stoch.update_layout(title=f"Estocástico — {t}", height=250,
+                    yaxis=dict(range=[0, 100]))
+                st.plotly_chart(fig_stoch, use_container_width=True)
+
+    with st.expander("ℹ️ Interpretación de indicadores"):
             st.markdown("""
             | Indicador | Señal alcista | Señal bajista |
             |---|---|---|
@@ -331,69 +341,84 @@ with tabs[1]:
 
 with tabs[2]:
     st.subheader("📉 Rendimientos y Propiedades Empíricas")
-    ticker_r = st.selectbox("Seleccione un activo", tickers, key="m2_ticker")
+
+    # Boxplot comparativo arriba — todos los activos de una vez
+    st.markdown("### 📊 Comparativa de Volatilidad — Todos los Activos")
+    fig_box = go.Figure()
+    for t in tickers:
+        serie_box = st.session_state.get(f"rend_{t}", {}).get("serie")
+        if not serie_box:
+            serie_box = api_get(f"/analisis/rendimientos-serie/{t}")
+        if serie_box:
+            r_log = pd.Series([x["rendimiento"] for x in serie_box["serie"]]) * 100
+            fig_box.add_trace(go.Box(y=r_log, name=t, boxpoints="outliers", marker_size=2))
+    try:
+        fig_box.update_layout(**plotly_layout("Distribución de Rendimientos por Activo (%)", height=350))
+    except:
+        fig_box.update_layout(title="Boxplot", height=350)
+    st.plotly_chart(fig_box, use_container_width=True)
+
+    st.divider()
+
+    # Precarga todos los tickers
     for _t in tickers:
         _key = f"rend_{_t}"
         if _key not in st.session_state:
             _data = {
                 "stats": api_get(f"/analisis/rendimientos/{_t}"),
-                "serie": api_get(f"/analisis/rendimientos-serie/{_t}")
-
+                "serie": api_get(f"/analisis/rendimientos-serie/{_t}"),
             }
             if _data["stats"] and _data["serie"]:
-                st.session_state[_key]=_data
+                st.session_state[_key] = _data
 
-    cache_key_m2 = f"rend_{ticker_r}"
-    if cache_key_m2 not in st.session_state: 
-        st.info("⏳ Cargando datos...")
-    else:
-        data_stats = st.session_state[cache_key_m2]["stats"]   # ✅
-        data_serie = st.session_state[cache_key_m2]["serie"]
+    # Acordeón por ticker
+    st.markdown("### 📈 Análisis Individual por Activo")
+    from scipy import stats as sp_stats
 
-        if data_stats and data_serie:
+    for idx, t in enumerate(tickers):
+        datos = st.session_state.get(f"rend_{t}")
+        if not datos:
+            continue
+
+        data_stats = datos["stats"]
+        data_serie = datos["serie"]
+
+        with st.expander(f"📉 {t} — Propiedades Empíricas", expanded=(idx == 0)):
             df_r = pd.DataFrame(data_serie["serie"])
             df_r["fecha"] = pd.to_datetime(df_r["fecha"])
             df_r.set_index("fecha", inplace=True)
             rend_vals = df_r["rendimiento"] * 100
-            
-            # ── 1. Métricas Principales (Fusión de ambos proyectos) ────────────────
+
+            # Métricas
             c1, c2, c3, c4, c5 = st.columns(5)
             c1.metric("Media Diaria", f"{data_stats['media_diaria']*100:.4f}%")
             c2.metric("Volatilidad Diaria", f"{data_stats['std_diaria']*100:.4f}%")
-            c3.metric("Asimetría (Skew)", f"{data_stats['asimetria']:.3f}")
+            c3.metric("Asimetría", f"{data_stats['asimetria']:.3f}")
             c4.metric("Curtosis", f"{data_stats['curtosis']:.3f}")
-            # Percentil 5% (Cálculo local para complementar)
-            p5_val = rend_vals.quantile(0.05) / 100
-            c5.metric("Peor día (5%)", f"{p5_val*100:.2f}%")
+            p5_val = rend_vals.quantile(0.05)
+            c5.metric("Peor día (5%)", f"{p5_val:.2f}%")
 
             st.markdown("---")
 
-            # ── 2. Visualización de Series y Distribución ──────────────────────────
             col_a, col_b = st.columns(2)
-
             with col_a:
-                # Serie de rendimientos log (Estilo área del proyecto anterior)
                 fig_rend = go.Figure()
                 fig_rend.add_trace(go.Scatter(
                     x=df_r.index, y=df_r["rendimiento"]*100,
-                    name="Rend. log diario", 
+                    name="Rend. log diario",
                     line=dict(color="#A78BFA", width=0.8),
-                    fill="tozeroy", 
-                    fillcolor="rgba(167,139,250,0.1)",
+                    fill="tozeroy", fillcolor="rgba(167,139,250,0.1)",
                 ))
                 try:
-                    fig_rend.update_layout(**plotly_layout("Serie de rendimientos log diarios (%)", height=350))
+                    fig_rend.update_layout(**plotly_layout(f"Serie log diaria — {t}", height=280))
                 except:
-                    fig_rend.update_layout(title="Rendimientos diarios (%)", height=350, template="plotly_dark")
+                    fig_rend.update_layout(title=f"Rendimientos {t}", height=280)
                 st.plotly_chart(fig_rend, use_container_width=True)
 
             with col_b:
-                # Histograma vs Normal
                 mu, sigma = rend_vals.mean(), rend_vals.std()
                 x_norm = np.linspace(rend_vals.min(), rend_vals.max(), 200)
-                # Curva normal teórica
-                y_norm = (1 / (sigma * np.sqrt(2 * np.pi))) * np.exp(-0.5 * ((x_norm - mu) / sigma) ** 2)
-
+                y_norm = (1/(sigma*np.sqrt(2*np.pi))) * np.exp(-0.5*((x_norm-mu)/sigma)**2)
                 fig_hist = go.Figure()
                 fig_hist.add_trace(go.Histogram(
                     x=rend_vals, nbinsx=60, name="Distribución Real",
@@ -405,26 +430,22 @@ with tabs[2]:
                     line=dict(color="#3b82f6", width=2),
                 ))
                 try:
-                    fig_hist.update_layout(**plotly_layout("Histograma vs Normal Teórica", height=350))
+                    fig_hist.update_layout(**plotly_layout("Histograma vs Normal", height=280))
                 except:
-                    fig_hist.update_layout(title="Distribución", height=350, template="plotly_dark")
+                    fig_hist.update_layout(title="Histograma", height=280)
                 st.plotly_chart(fig_hist, use_container_width=True)
 
-            # ── 3. Análisis de Colas y Comparativa ────────────────────────────────
             col_c, col_d = st.columns(2)
-
             with col_c:
-                # Q-Q Plot (Mejorado estadísticamente)
                 rend_sorted = np.sort(df_r["rendimiento"].dropna())
-                # Cuantiles teóricos usando scipy
-                from scipy import stats as sp_stats
-                cuantiles_teo = sp_stats.norm.ppf(np.linspace(0.01, 0.99, len(rend_sorted)), loc=df_r["rendimiento"].mean(), scale=df_r["rendimiento"].std())
-                
+                cuantiles_teo = sp_stats.norm.ppf(
+                    np.linspace(0.01, 0.99, len(rend_sorted)),
+                    loc=df_r["rendimiento"].mean(), scale=df_r["rendimiento"].std()
+                )
                 fig_qq = go.Figure()
                 fig_qq.add_trace(go.Scatter(
-                    x=cuantiles_teo, y=rend_sorted,
-                    mode="markers", name="Datos Observados",
-                    marker=dict(color="#A5B4FC", size=4, opacity=0.7),
+                    x=cuantiles_teo, y=rend_sorted, mode="markers",
+                    name="Datos", marker=dict(color="#A5B4FC", size=3, opacity=0.7),
                 ))
                 fig_qq.add_trace(go.Scatter(
                     x=[min(cuantiles_teo), max(cuantiles_teo)],
@@ -432,52 +453,31 @@ with tabs[2]:
                     name="Línea 45°", line=dict(color="#ef4444", dash="dash"),
                 ))
                 try:
-                    fig_qq.update_layout(**plotly_layout("Q-Q Plot vs Normalidad", height=350, xaxis_title="Cuantiles Teóricos", yaxis_title="Cuantiles Observados"))
+                    fig_qq.update_layout(**plotly_layout("Q-Q Plot", height=280,
+                        xaxis_title="Cuantiles Teóricos", yaxis_title="Observados"))
                 except:
-                    fig_qq.update_layout(title="Q-Q Plot", height=350, template="plotly_dark")
+                    fig_qq.update_layout(title="Q-Q Plot", height=280)
                 st.plotly_chart(fig_qq, use_container_width=True)
 
             with col_d:
-                # Boxplot Comparativo (Top 5 activos del portafolio)
-                fig_box = go.Figure()
-                for t in tickers[:5]:
-                    serie_box = cached_get(f"/analisis/rendimientos-serie/{t}")
-                    if serie_box:
-                        r_log = pd.Series([x["rendimiento"] for x in serie_box["serie"]]) * 100
-                        fig_box.add_trace(go.Box(y=r_log, name=t, boxpoints="outliers", marker_size=2))
-                try:
-                    fig_box.update_layout(**plotly_layout("Comparativa de Volatilidad (Boxplot %)", height=350))
-                except:
-                    fig_box.update_layout(title="Boxplot", height=350, template="plotly_dark")
-                st.plotly_chart(fig_box, use_container_width=True)
+                jb = data_stats["jarque_bera"]
+                sw = data_stats["shapiro_wilk"]
+                st.markdown("#### ⚖️ Pruebas de Normalidad")
+                n1, n2, n3 = st.columns(3)
+                n1.metric("Jarque-Bera p", f"{jb['p_value']:.5f}",
+                    delta="Normal ✅" if jb["es_normal"] else "No normal ⚠️",
+                    delta_color="normal" if jb["es_normal"] else "inverse")
+                n2.metric("Shapiro-Wilk p", f"{sw['p_value']:.5f}",
+                    delta="Normal ✅" if sw["es_normal"] else "No normal ⚠️",
+                    delta_color="normal" if sw["es_normal"] else "inverse")
+                n3.metric("Conclusión",
+                    "✅ Normal" if jb["es_normal"] and sw["es_normal"] else "⚠️ Colas Pesadas")
 
-            # ── 4. Pruebas de Normalidad y Conclusión ────────────────────────────
-            st.markdown("#### ⚖️ Pruebas de Normalidad Formales")
-            jb, sw = data_stats["jarque_bera"], data_stats["shapiro_wilk"]
-            
-            ce1, ce2, ce3 = st.columns(3)
-            ce1.metric(
-                "Jarque-Bera (p-valor)", f"{jb['p_value']:.6f}",
-                delta="Normal ✅" if jb["es_normal"] else "No normal ⚠️",
-                delta_color="normal" if jb["es_normal"] else "inverse"
-            )
-            ce2.metric(
-                "Shapiro-Wilk (p-valor)", f"{sw['p_value']:.6f}",
-                delta="Normal ✅" if sw["es_normal"] else "No normal ⚠️",
-                delta_color="normal" if sw["es_normal"] else "inverse"
-            )
-            ce3.metric(
-                "Conclusión Estadística", 
-                "✅ Distribución Normal" if jb["es_normal"] and sw["es_normal"] else "⚠️ Evidencia de Colas Pesadas"
-            )
-
-            with st.expander("ℹ️ Hechos Estilizados de los Rendimientos"):
                 st.markdown(f"""
-                Al analizar **{ticker_r}**, observamos las propiedades típicas de las series financieras:
-                - **Exceso de Curtosis:** Con una curtosis de **{data_stats['curtosis']:.2f}**, el activo presenta colas más anchas que una normal (leptocurtosis).
-                - **Asimetría:** El valor de **{data_stats['asimetria']:.2f}** indica si el activo tiende a presentar caídas más extremas que subidas.
-                - **Agrupamiento de Volatilidad:** Nota en la serie de tiempo cómo los picos de varianza suelen ocurrir en grupos.
-                - **Impacto en el Riesgo:** La falla en las pruebas de Jarque-Bera y Shapiro-Wilk justifica el uso de modelos como **GARCH** para la volatilidad y **VaR Histórico** para el riesgo.
+                **Propiedades empíricas de {t}:**
+                - Curtosis **{data_stats['curtosis']:.2f}** → {"leptocúrtica (colas pesadas)" if data_stats['curtosis'] > 3 else "mesocúrtica (normal)"}
+                - Asimetría **{data_stats['asimetria']:.2f}** → {"sesgada negativamente (más caídas extremas)" if data_stats['asimetria'] < 0 else "sesgada positivamente"}
+                - Esto justifica usar **VaR Histórico** y **GARCH** en vez de métodos paramétricos normales.
                 """)
 
 # ═══════════════════ MÓD 3 — VOLATILIDAD ═══════════════════
@@ -491,99 +491,99 @@ with tabs[3]:
         icon="💡",
     )
 
-    ticker_g = st.selectbox("Seleccione un activo para modelar", tickers, key="m3_ticker")
-    cache_key_m3=f"vol_{ticker_g}"
-    if st.button("🔄 Analizar Volatilidad Condicional", key="btn_m3"):
-        if cache_key_m3 not in st.session_state:
-            with st.spinner("Consultando modelos EWMA y GARCH en el servidor..."):
-                safe_ticker = urllib.parse.quote(ticker_g, safe='')
-                st.session_state[cache_key_m3]={
-                    "ewma" : api_get(f"/analisis/ewma/{safe_ticker}"),
-                    "garch" : api_get(f"/analisis/garch/{safe_ticker}"),
-                    "precios" : api_get(f"/precios/{safe_ticker}"),
+    # Carga automática para todos los tickers
+    cache_key_m3_all = f"vol_all_{'_'.join(tickers)}"
+    if cache_key_m3_all not in st.session_state:
+        with st.spinner("Calculando modelos EWMA y GARCH para todos los activos..."):
+            resultados_vol = {}
+            for t in tickers:
+                safe_t = urllib.parse.quote(t, safe='')
+                resultados_vol[t] = {
+                    "ewma":    api_get(f"/analisis/ewma/{safe_t}"),
+                    "garch":   api_get(f"/analisis/garch/{safe_t}"),
+                    "precios": cached_get(f"/precios/{safe_t}"),
                 }
-    if cache_key_m3 in st.session_state:
-        ewma_data =st.session_state[cache_key_m3]["ewma"]
-        garch_data =st.session_state[cache_key_m3]["garch"]
-        precios_data =st.session_state[cache_key_m3]["precios"]
-            
-        if ewma_data and garch_data and precios_data:
-            # ── 1. Procesamiento para el Gráfico de Volatilidad ────────────────
-            df_p = pd.DataFrame(precios_data)
-            df_p["fecha"] = pd.to_datetime(df_p["fecha"])
-            df_p.set_index("fecha", inplace=True)
-            
-            # Cálculo de rendimientos logarítmicos y volatilidad móvil
-            df_p["rendimiento_log"] = np.log(df_p["close"] / df_p["close"].shift(1))
-            df_p = df_p.dropna()
-            df_p["vol_movil"] = df_p["rendimiento_log"].rolling(21).std() * np.sqrt(252) * 100
+            st.session_state[cache_key_m3_all] = resultados_vol
 
-            # ── 2. Gráfico de Volatility Clustering ─────────────────────────────
-            fig_vol = go.Figure()
-            
-            # Serie de rendimientos absolutos (fondo)
-            fig_vol.add_trace(go.Scatter(
-                x=df_p.index,
-                y=df_p["rendimiento_log"].abs() * 100,
-                name="|Rendimiento| diario",
-                line=dict(color="rgba(167, 139, 250, 0.4)", width=0.8), # Morado semitransparente
-            ))
-            
-            # Línea de volatilidad móvil (frente)
-            fig_vol.add_trace(go.Scatter(
-                x=df_p.index, 
-                y=df_p["vol_movil"],
-                name="Volatilidad móvil 21 días (Anual)",
-                line=dict(color="#ED1E79", width=2), # Rosa fuerte
-            ))
-            
-            try:
-                fig_vol.update_layout(**plotly_layout("Agrupamiento de Volatilidad (Volatility Clustering)", height=380, yaxis_title="Magnitud (%)"))
-            except:
-                fig_vol.update_layout(title="Agrupamiento de Volatilidad", height=380, template="plotly_dark", yaxis_title="%")
-                
-            st.plotly_chart(fig_vol, use_container_width=True)
+    resultados_vol = st.session_state.get(cache_key_m3_all, {})
 
-            st.divider()
+    if not resultados_vol:
+        st.info("⏳ Ve primero al **Tab 1** para cargar los datos.")
+    else:
+        for t, datos in resultados_vol.items():
+            ewma_data   = datos.get("ewma")
+            garch_data  = datos.get("garch")
+            precios_data = datos.get("precios")
 
-            # ── 3. Métricas de los Modelos (EWMA y GARCH) ──────────────────────
-            st.markdown("#### Comparativa de Modelos de Volatilidad")
-            col_ewma, col_garch = st.columns(2)
+            if not (ewma_data and garch_data and precios_data):
+                continue
 
-            with col_ewma:
-                st.markdown("##### 📉 Estimación EWMA (RiskMetrics)")
-                # Asumimos que el backend devuelve un decimal, lo pasamos a %
-                vol_ewma = ewma_data.get('volatilidad_ewma', 0)
-                st.metric("Volatilidad EWMA Anualizada", f"{vol_ewma * 100:.2f}%" if vol_ewma < 1 else f"{vol_ewma:.2f}%")
-                
-                st.info("Lambda (λ) = 0.94. El modelo de Suavizado Exponencial (EWMA) otorga exponencialmente mayor peso a los choques de mercado más recientes, reaccionando rápido a las crisis.")
+            with st.expander(f"📊 {t} — Volatilidad Condicional", expanded=(t == tickers[0])):
+                df_p = pd.DataFrame(precios_data)
+                df_p["fecha"] = pd.to_datetime(df_p["fecha"])
+                df_p.set_index("fecha", inplace=True)
+                df_p["rendimiento_log"] = np.log(df_p["close"] / df_p["close"].shift(1))
+                df_p = df_p.dropna()
+                df_p["vol_movil"] = df_p["rendimiento_log"].rolling(21).std() * np.sqrt(252) * 100
 
-            with col_garch:
-                st.markdown("##### 🌊 Modelo Óptimo (Selección por AIC)")
-                modelo_optimo = garch_data.get("mejor_modelo", garch_data.get("orden", "N/A"))
-                st.metric("Mejor Modelo", modelo_optimo)
-                
-                c1, c2, c3 = st.columns(3)
-                c1.metric("AIC", round(garch_data.get("aic", 0), 2))
-                c2.metric("BIC", round(garch_data.get("bic", 0), 2))
-                persistencia = garch_data.get("persistencia", 0)
-                c3.metric("Persistencia (α+β)", f"{persistencia:.4f}")
+                fig_vol = go.Figure()
+                fig_vol.add_trace(go.Scatter(
+                    x=df_p.index, y=df_p["rendimiento_log"].abs() * 100,
+                    name="|Rendimiento| diario",
+                    line=dict(color="rgba(167, 139, 250, 0.4)", width=0.8),
+                ))
+                fig_vol.add_trace(go.Scatter(
+                    x=df_p.index, y=df_p["vol_movil"],
+                    name="Volatilidad móvil 21 días (Anual)",
+                    line=dict(color="#ED1E79", width=2),
+                ))
+                try:
+                    fig_vol.update_layout(**plotly_layout(f"Volatility Clustering — {t}", height=320, yaxis_title="Magnitud (%)"))
+                except:
+                    fig_vol.update_layout(title=f"Volatilidad {t}", height=320)
+                st.plotly_chart(fig_vol, use_container_width=True)
 
-                if "tabla_comparativa" in garch_data:
-                    st.markdown("**Comparativa de modelos:**")
-                    df_tabla = pd.DataFrame(garch_data["tabla_comparativa"])
-                    df_tabla = df_tabla.sort_values("aic")
-                    df_tabla.columns = ["Modelo", "AIC", "BIC", "Log-Lik"]
-                    st.dataframe(df_tabla.set_index("Modelo"), use_container_width=True)
+                col_ewma, col_garch = st.columns(2)
+                with col_ewma:
+                    st.markdown("##### 📉 EWMA (RiskMetrics)")
+                    vol_ewma = ewma_data.get('volatilidad_ewma', 0)
+                    st.metric("Volatilidad EWMA Anualizada", f"{vol_ewma * 100:.2f}%" if vol_ewma < 1 else f"{vol_ewma:.2f}%")
+                    st.info("λ = 0.94 — mayor peso a choques recientes.")
 
-                if persistencia > 0.98:
-                    st.error("Persistencia extrema (>0.98): shocks casi permanentes.")
-                elif persistencia > 0.90:
-                    st.warning("Persistencia alta (>0.90): mercado tardará en calmarse.")
-                else:
-                    st.success("Persistencia moderada: volatilidad revierte a la media.")
-        else:
-            st.error("⚠️ No se pudieron obtener los datos de volatilidad. Verifica que los endpoints '/ewma' y '/garch' funcionen correctamente en el backend.")
+                with col_garch:
+                    st.markdown("##### 🌊 Criterios de Información — Selección de Modelo")
+                    modelo_optimo = garch_data.get("mejor_modelo", garch_data.get("orden", "N/A"))
+                    persistencia = garch_data.get("persistencia", 0)
+
+                    if "tabla_comparativa" in garch_data:
+                        df_tabla = pd.DataFrame(garch_data["tabla_comparativa"])
+                        df_tabla = df_tabla.sort_values("aic").reset_index(drop=True)
+                        df_tabla.columns = ["Modelo", "AIC", "BIC", "Log-Lik"]
+
+                        # Agregar estrella al mejor modelo
+                        df_tabla["Modelo"] = df_tabla["Modelo"].apply(
+                            lambda m: f"⭐ {m} ← ÓPTIMO" if m == modelo_optimo else m
+                        )
+                        st.dataframe(df_tabla.set_index("Modelo"), use_container_width=True)
+
+                        st.markdown(f"""
+                        **¿Por qué {modelo_optimo}?**
+                        El modelo con **menor AIC** ({garch_data.get('aic', 0):.2f}) y **menor BIC** ({garch_data.get('bic', 0):.2f}) 
+                        ofrece el mejor balance entre ajuste y parsimonia. 
+                        Un AIC más bajo indica mejor capacidad predictiva penalizando la complejidad del modelo.
+                        """)
+
+                    c1, c2, c3 = st.columns(3)
+                    c1.metric("AIC Óptimo", round(garch_data.get("aic", 0), 2))
+                    c2.metric("BIC Óptimo", round(garch_data.get("bic", 0), 2))
+                    c3.metric("Persistencia (α+β)", f"{persistencia:.4f}")
+
+                    if persistencia > 0.98:
+                        st.error("Persistencia extrema (>0.98): shocks casi permanentes.")
+                    elif persistencia > 0.90:
+                        st.warning("Persistencia alta (>0.90): mercado tardará en calmarse.")
+                    else:
+                        st.success("Persistencia moderada: volatilidad revierte a la media.")
 
 
 # ═══════════════════ MÓD 4 — CAPM ═══════════════════
@@ -712,62 +712,88 @@ with tabs[5]:
         El **CVaR (Expected Shortfall)** mide la pérdida promedio en caso de que se supere el VaR.
     """)
 
-    # Selección de activo y configuración
-    col_v1, col_v2 = st.columns([2, 1])
-    with col_v1:
-        ticker_v = st.selectbox("Seleccione el activo para el análisis de riesgo", tickers, key="m5_ticker")
-    with col_v2:
-        st.write(f"**Confianza:** {confianza_var:.0%} | **Capital:** ${valor_portafolio:,.0f}")
+    st.caption(f"**Confianza:** {confianza_var:.0%} | **Capital:** ${valor_portafolio:,.0f}")
 
-    cache_key_m5 = f"var_{ticker_v}_{confianza_var}"
-    if st.button("🔄 Ejecutar Análisis de Riesgo", key="btn_var_run"):
-        if cache_key_m5 not in st.session_state:
-            with st.spinner(f"Calculando métricas de riesgo para {ticker_v}..."):
-                safe_ticker = urllib.parse.quote(ticker_v, safe='')
-                st.session_state[cache_key_m5] = {
-                    "var": api_get(f"/analisis/var/{safe_ticker}"),
-                    "rend": api_get(f"/analisis/rendimientos/{safe_ticker}"),
-                }
-        data_v = st.session_state.get(cache_key_m5, {}).get("var")
-        data_r = st.session_state.get(cache_key_m5, {}).get("rend")
+    # ── VaR del Portafolio Completo (automático) ──
+    cache_key_vp = f"var_portafolio_{confianza_var}"
+    if cache_key_vp not in st.session_state:
+        with st.spinner("Calculando VaR del portafolio..."):
+            resultado_vp = api_get("/analisis/var-portafolio", params={"nivel": confianza_var})
+            if resultado_vp:
+                st.session_state[cache_key_vp] = resultado_vp
 
-        if data_v and data_r:
-            # Determinamos el método recomendado basado en la normalidad de Jarque-Bera
+    data_vp = st.session_state.get(cache_key_vp)
+
+    if data_vp:
+        st.markdown("### 📊 VaR del Portafolio Completo")
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("VaR Portafolio", f"{data_vp['var_parametrico_portafolio']:.6f}",
+                delta=f"-USD {abs(data_vp['var_parametrico_portafolio'])*valor_portafolio:,.0f}")
+        c2.metric("Volatilidad Anual", f"{data_vp['volatilidad_anual_portafolio']*100:.2f}%")
+        c3.metric("Retorno Esperado", f"{data_vp['retorno_anual_esperado']*100:.2f}%")
+        # CVaR aproximado = VaR * 1.3 (aproximación estándar)
+        cvar_port = abs(data_vp['var_parametrico_portafolio']) * 1.3
+        c4.metric("CVaR Estimado", f"{-cvar_port:.6f}",
+                delta=f"-USD {cvar_port*valor_portafolio:,.0f}")
+        st.info("El VaR del portafolio es **menor** que la suma de los VaR individuales gracias a la **diversificación**.")
+        st.divider()
+
+    # ── VaR Individual por Activo (automático) ──
+    st.markdown("### 🎯 Análisis Individual por Activo")
+
+    # Precarga todos
+    for _t in tickers:
+        _key = f"var_{_t}_{confianza_var}"
+        if _key not in st.session_state:
+            safe_t = urllib.parse.quote(_t, safe='')
+            _data = {
+                "var":  api_get(f"/analisis/var/{safe_t}"),
+                "rend": st.session_state.get(f"rend_{_t}", {}).get("stats") or api_get(f"/analisis/rendimientos/{safe_t}"),
+            }
+            if _data["var"] and _data["rend"]:
+                st.session_state[_key] = _data
+
+    def metric_var(label, val, cap):
+        st.metric(label, f"{val*100:.4f}%",
+                  delta=f"-${abs(val)*cap:,.0f}", delta_color="inverse")
+
+    for idx, t in enumerate(tickers):
+        cache_key_t = f"var_{t}_{confianza_var}"
+        datos = st.session_state.get(cache_key_t)
+
+        with st.expander(f"🛡️ {t} — VaR y CVaR", expanded=(idx == 0)):
+            if not datos:
+                st.info("⏳ Cargando...")
+                continue
+
+            data_v = datos["var"]
+            data_r = datos["rend"]
+
             es_normal = data_r["jarque_bera"]["es_normal"]
             metodo_rec = "Paramétrico" if es_normal else "Histórico / Monte Carlo"
-            
-            st.success(f"Análisis completado para {ticker_v}. Método recomendado: **{metodo_rec.upper()}**")
+
             if not es_normal:
-                st.warning("⚠️ Los rendimientos no son normales. El VaR Paramétrico podría estar subestimando el riesgo de cola.")
+                st.warning(f"⚠️ Rendimientos no normales — método recomendado: **{metodo_rec}**")
+            else:
+                st.success(f"✅ Rendimientos normales — método recomendado: **{metodo_rec}**")
 
-            # ── 1. Métricas Principales (Con impacto monetario) ──
             c1, c2, c3, c4 = st.columns(4)
-            
-            # Función auxiliar para mostrar métricas consistentes
-            def metric_var(label, val, cap):
-                perda_monetaria = abs(val) * cap
-                st.metric(label, f"{val*100:.4f}%", delta=f"-${perda_monetaria:,.0f}", delta_color="inverse")
-
             with c1: metric_var("VaR Paramétrico", data_v['var_parametrico'], valor_portafolio)
             with c2: metric_var("VaR Histórico", data_v['var_historico'], valor_portafolio)
             with c3: metric_var("VaR Monte Carlo", data_v['var_montecarlo'], valor_portafolio)
-            with c4: metric_var("CVaR (Ex. Shortfall)", data_v['cvar'], valor_portafolio)
+            with c4: metric_var("CVaR (Shortfall)", data_v['cvar'], valor_portafolio)
 
-            st.divider()
-
-            # ── 2. Tabla Comparativa y Gráfico ──
             col_tab, col_fig = st.columns([1, 1.2])
-
             with col_tab:
-                st.markdown("#### Resumen de Pérdidas Potenciales")
                 res_data = [
                     {"Método": "Paramétrico", "VaR (%)": data_v['var_parametrico']*100, "VaR ($)": abs(data_v['var_parametrico'])*valor_portafolio},
-                    {"Método": "Histórico", "VaR (%)": data_v['var_historico']*100, "VaR ($)": abs(data_v['var_historico'])*valor_portafolio},
-                    {"Método": "Monte Carlo", "VaR (%)": data_v['var_montecarlo']*100, "VaR ($)": abs(data_v['var_montecarlo'])*valor_portafolio},
-                    {"Método": "CVaR (Tail)", "VaR (%)": data_v['cvar']*100, "VaR ($)": abs(data_v['cvar'])*valor_portafolio},
+                    {"Método": "Histórico",   "VaR (%)": data_v['var_historico']*100,   "VaR ($)": abs(data_v['var_historico'])*valor_portafolio},
+                    {"Método": "Monte Carlo", "VaR (%)": data_v['var_montecarlo']*100,  "VaR ($)": abs(data_v['var_montecarlo'])*valor_portafolio},
+                    {"Método": "CVaR",        "VaR (%)": data_v['cvar']*100,            "VaR ($)": abs(data_v['cvar'])*valor_portafolio},
                 ]
                 df_res = pd.DataFrame(res_data)
-                st.table(df_res.set_index("Método").style.format({"VaR (%)": "{:.4f}%", "VaR ($)": "${:,.2f}"}))
+                st.table(df_res.set_index("Método").style.format(
+                    {"VaR (%)": "{:.4f}%", "VaR ($)": "${:,.2f}"}))
 
             with col_fig:
                 fig_v = go.Figure()
@@ -778,47 +804,31 @@ with tabs[5]:
                     textposition='auto'
                 ))
                 try:
-                    fig_v.update_layout(**plotly_layout(f"Comparativa de Métodos (Confianza {confianza_var:.0%})", height=380, yaxis_title="% de pérdida diaria"))
+                    fig_v.update_layout(**plotly_layout(
+                        f"Comparativa VaR — {t} ({confianza_var:.0%})", height=320,
+                        yaxis_title="% pérdida diaria"))
                 except:
-                    fig_v.update_layout(title="Comparativa VaR", height=380, template="plotly_dark")
+                    fig_v.update_layout(title=f"VaR {t}", height=320)
                 st.plotly_chart(fig_v, use_container_width=True)
 
-            # ── 3. Interpretaciones y Expanders ──
-            st.markdown("---")
-            exp_a, exp_b = st.columns(2)
-            
-            with exp_a:
-                with st.expander("📖 Interpretación de los resultados"):
-                    st.write(f"""
-                    Al nivel de confianza del **{confianza_var:.0%}**, existe solo un **{100 - confianza_var*100:.0f}%** de probabilidad 
-                    de que las pérdidas diarias de **{ticker_v}** superen los **${abs(data_v['var_historico'])*valor_portafolio:,.0f}** (según el método histórico).
-                    
-                    Si llegáramos a entrar en ese escenario extremo (el peor {100 - confianza_var*100:.0f}% de los días), 
-                    la pérdida promedio esperada sería de **${abs(data_v['cvar'])*valor_portafolio:,.0f}**.
-                    """)
+            var_h_str = f"USD {abs(data_v['var_historico'])*valor_portafolio:,.0f}"
+            cvar_str = f"USD {abs(data_v['cvar'])*valor_portafolio:,.0f}"
+            st.info(
+                f"Al {confianza_var:.0%} de confianza, existe solo un "
+                f"{100-confianza_var*100:.0f}% de probabilidad de que las pérdidas de "
+                f"{t} superen {var_h_str} en un día. "
+                f"En el escenario extremo (CVaR), la pérdida promedio sería {cvar_str}."
+            )
 
-            with exp_b:
-                with st.expander("ℹ️ ¿Qué método es más confiable?"):
-                    st.markdown(f"""
-                    | Método | Cuándo usarlo |
-                    |---|---|
-                    | **Paramétrico** | Si los datos son **Normales** (Jarque-Bera p > 0.05). |
-                    | **Histórico** | Si hay **Colas Pesadas** o mucha asimetría. No asume normalidad. |
-                    | **Monte Carlo** | El más flexible para portafolios complejos o simulaciones futuras. |
-                    """)
-            st.divider()
-            st.markdown("### 📊 VaR del Portafolio Completo")
-            with st.spinner("Calculando..."):
-                data_vp = api_get("/analisis/var-portafolio", params={"nivel": confianza_var})
-            if data_vp:
-                c1, c2, c3 = st.columns(3)
-                c1.metric("VaR Portafolio", f"{data_vp['var_parametrico_portafolio']:.6f}",
-                        delta=f"-${abs(data_vp['var_parametrico_portafolio'])*valor_portafolio:,.0f}")
-                c2.metric("Volatilidad Anual", f"{data_vp['volatilidad_anual_portafolio']*100:.2f}%")
-                c3.metric("Retorno Esperado", f"{data_vp['retorno_anual_esperado']*100:.2f}%")
-                st.info("El VaR del portafolio es menor que la suma de los VaR individuales gracias a la **diversificación** entre activos.")
-        else:
-            st.error("⚠️ Error al conectar con el endpoint de VaR. Por favor verifica que el backend esté activo.")
+    st.divider()
+    with st.expander("ℹ️ ¿Qué método es más confiable?"):
+        st.markdown("""
+        | Método | Cuándo usarlo |
+        |---|---|
+        | **Paramétrico** | Si los datos son **Normales** (Jarque-Bera p > 0.05). |
+        | **Histórico** | Si hay **Colas Pesadas**. No asume normalidad. |
+        | **Monte Carlo** | El más flexible para portafolios complejos. |
+        """)
         
 
 # ═══════════════════ MÓD 6 — MARKOWITZ ═══════════════════
