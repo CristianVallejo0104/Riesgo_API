@@ -37,8 +37,19 @@ st.markdown("""
     }
     .main-header h1 { margin: 0; font-size: 1.8rem; font-weight: 700; color: white; }
     .main-header p  { margin: 0.3rem 0 0; color: #e2e8f0; font-size: 0.9rem; }
-    .stTabs [data-baseweb="tab-list"] { gap: 4px; }
-    .stTabs [data-baseweb="tab"] { border-radius: 8px 8px 0 0; padding: 8px 16px; font-weight: 600; font-size: 0.82rem; }
+    .stTabs [data-baseweb="tab-list"] { 
+        gap: 2px; 
+        overflow-x: auto !important; 
+        flex-wrap: nowrap !important;
+        scrollbar-width: thin;
+    }
+    .stTabs [data-baseweb="tab"] { 
+        border-radius: 8px 8px 0 0; 
+        padding: 6px 10px; 
+        font-weight: 600; 
+        font-size: 0.75rem;
+        white-space: nowrap;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -180,11 +191,12 @@ except Exception as e:
 
 # ═══════════════════ TABS ═══════════════════
 
+
 tabs = st.tabs([
-    "🎯 Contexto", "📈 1. Técnico", "📉 2. Rendimientos", "🌊 3. Volatilidad",
-    "🎯 4. CAPM", "🛡️ 5. VaR/CVaR", "⚡ 6. Markowitz",
-    "🚦 7. Señales", "🌐 8. Macro", "📐 9. Renta Fija",
-    "🧮 10. Opciones", "💥 11. Stress", "🤖 ML", "🧠 Agente IA",
+"🎯 Contexto", "📈 1. Técnico", "📉 2. Rendimientos", "🌊 3. Volatilidad",
+"🎯 4. CAPM", "🛡️ 5. VaR/CVaR", "⚡ 6. Markowitz",
+"🚦 7. Señales", "🌐 8. Macro", "📐 9. Renta Fija",
+"🧮 10. Opciones", "💥 11. Stress", "🤖 ML", "🧠 Agente IA",
 ])
 
 
