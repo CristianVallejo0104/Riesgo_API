@@ -1839,20 +1839,41 @@ with tabs[12]:
             label = p['direccion'].upper()
             prob = p['probabilidad']
             emoji = "📈" if label == "SUBE" else "📉"
-            color = "normal" if label == "SUBE" else "inverse"
+            confianza = "ALTA" if prob > 0.7 else "MEDIA" if prob > 0.55 else "BAJA"
+            color_delta = "normal" if label == "SUBE" else "inverse"
             with cols[i]:
-                st.metric(f"{emoji} {t}", label,
-                         delta=f"{prob:.1%} confianza",
-                         delta_color=color)
+                st.metric(
+                    f"{emoji} {t}",
+                    label,
+                    delta=f"{prob:.1%} — {confianza}",
+                    delta_color=color_delta
+                )
 
-    with st.expander("🧠 ¿Cómo funciona este modelo?"):
+        st.divider()
+        st.markdown("#### 📖 Interpretación de Señales")
+        compras = sum(1 for p in preds_guardadas.values() if p['direccion'].upper() == "SUBE")
+        ventas = sum(1 for p in preds_guardadas.values() if p['direccion'].upper() == "BAJA")
+        total = len(preds_guardadas)
+
+        if compras > ventas:
+            st.success(f"📈 **Sesgo alcista del portafolio** — {compras}/{total} activos con señal de SUBE.")
+        elif ventas > compras:
+            st.error(f"📉 **Sesgo bajista del portafolio** — {ventas}/{total} activos con señal de BAJA.")
+        else:
+            st.warning(f"⚖️ **Portafolio neutral** — señales mixtas, sin tendencia clara.")
+
         st.markdown("""
-        Este módulo utiliza un algoritmo de **Random Forest Classifier**.
-        - **Entradas:** Precios históricos, volumen e indicadores técnicos (RSI, Medias Móviles).
-        - **Salida:** Clasifica si el precio de cierre de mañana será **superior (Sube)** o **inferior (Baja)** al de hoy.
-        - **Probabilidad:** Indica qué tan seguro está el modelo de su decisión.
-        - **Confianza ALTA (>70%):** señal fuerte. **MEDIA (55-70%):** señal moderada. **BAJA (<55%):** señal débil.
-        - El modelo se re-entrena con los datos históricos disponibles en la BD cada vez que presionas entrenar.
+        | Confianza | Significado |
+        |---|---|
+        | **ALTA (>70%)** | El modelo está muy seguro de su predicción |
+        | **MEDIA (55-70%)** | Señal moderada, considerar otros indicadores |
+        | **BAJA (<55%)** | Señal débil, el modelo tiene poca certeza |
+        """)
+
+        st.info("""
+        ⚠️ **Importante:** estas predicciones son generadas por un modelo de Machine Learning 
+        entrenado con datos históricos. No constituyen asesoramiento financiero. 
+        La precisión del modelo (~50%) indica que los mercados son difíciles de predecir de forma consistente.
         """)
 
 
