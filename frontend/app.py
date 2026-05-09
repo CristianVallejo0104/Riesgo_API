@@ -1415,143 +1415,166 @@ with tabs[9]:
 
 with tabs[10]:
     st.subheader("🧮 Valuación de Opciones — Black-Scholes")
+    st.info("Black-Scholes calcula el precio teórico de opciones europeas basado en 5 parámetros de mercado.", icon="💡")
 
-    # 1. Aseguramos que la tasa fred exista (definición local por seguridad)
-    tasa_fred_local = 0.04 
+    # Tasa FRED
+    tasa_fred_local = tasa_fred
     try:
-        curva_opt = api_get("/renta-fija/curva")
+        curva_opt = cached_get("/renta-fija/curva")
         if curva_opt and "datos_mercado" in curva_opt:
             tasa_fred_local = list(curva_opt["datos_mercado"]["tasas"])[0] / 100
     except:
         pass
 
+    # Precio actual del ticker seleccionado
+    precio_actual = 100.0
+    try:
+        precios_opt = cached_get(f"/precios/{ticker_sel}")
+        if precios_opt and len(precios_opt) > 0:
+            precio_actual = float(precios_opt[-1]["close"])
+    except:
+        pass
+
+    # ── Parámetros ──
     with st.container(border=True):
+        st.caption(f"💡 Precio actual de **{ticker_sel}**: USD {precio_actual:,.2f} | Tasa FRED: {tasa_fred_local*100:.2f}%")
         c1, c2, c3, c4, c5 = st.columns(5)
-        S = c1.number_input("Precio Spot (S)", value=100.0, step=5.0)
-        K = c2.number_input("Strike (K)", value=100.0, step=5.0)
-        T = c3.number_input("Años (T)", value=1.0, step=0.1)
-        # Usamos la tasa detectada
-        r_opt = c4.number_input("Tasa (r)", value=tasa_fred_local, format="%.4f")
-        sigma = c5.number_input("Volatilidad (σ)", value=0.20, step=0.05)
+        S = c1.number_input("Precio Spot (S)", value=round(precio_actual, 2), min_value=0.01, step=5.0)
+        K = c2.number_input("Strike (K)", value=round(precio_actual, 2), min_value=0.01, step=5.0)
+        T = c3.number_input("Años (T)", value=1.0, min_value=0.01, max_value=50.0, step=0.1)
+        r_opt = c4.number_input("Tasa (r)", value=tasa_fred_local, min_value=-0.20, max_value=1.0, format="%.4f")
+        sigma = c5.number_input("Volatilidad (σ)", value=0.20, min_value=0.01, max_value=5.0, step=0.05)
 
-    if st.button("🔄 Calcular Griegas y Precios", key="btn_m10"):
-        with st.spinner("Calculando..."):
-            data_bs = api_get("/opciones/black-scholes", params={"S": S, "K": K, "T": T, "r": r_opt, "sigma": sigma})
-        
-        if data_bs:
-            col1, col2 = st.columns([1, 1.5])
-            with col1:
-                st.markdown("### 💲 Primas")
-                st.metric("Call Price", f"${data_bs['precios']['call']:.4f}")
-                st.metric("Put Price", f"${data_bs['precios']['put']:.4f}")
-                
-                st.markdown("### 📊 Griegas")
-                g = data_bs["greeks"]
-                ga, gb = st.columns(2)
-                ga.write(f"**Delta:** {g['delta_call']:.3f}")
-                ga.write(f"**Gamma:** {g['gamma']:.5f}")
-                gb.write(f"**Vega:** {g['vega']:.3f}")
-                gb.write(f"**Theta:** {g['theta_call']:.3f}")
+    # ── Cálculo automático con session_state ──
+    cache_key_bs = f"bs_{S}_{K}_{T}_{r_opt}_{sigma}"
+    if cache_key_bs not in st.session_state:
+        with st.spinner("Calculando Black-Scholes..."):
+            resultado_bs = api_get("/opciones/black-scholes",
+                params={"S": S, "K": K, "T": T, "r": r_opt, "sigma": sigma})
+            if resultado_bs:
+                st.session_state[cache_key_bs] = resultado_bs
 
-            # ── AQUÍ ESTÁ EL CAMBIO DE COLOR Y ESTÉTICA ──
-            with col2:
-                st.markdown("### 📈 Perfil de Beneficios")
-                st_range = np.linspace(S*0.5, S*1.5, 50)
-                payoff_call = np.maximum(st_range - K, 0) - data_bs['precios']['call']
-                payoff_put = np.maximum(K - st_range, 0) - data_bs['precios']['put']
-                
-                fig_opt = go.Figure()
+    data_bs = st.session_state.get(cache_key_bs)
 
-                # Call en Cian con Relleno
-                fig_opt.add_trace(go.Scatter(
-                    x=st_range, y=payoff_call, 
-                    name="Long Call", 
-                    line=dict(color="#00f2ff", width=3),
-                    fill='tozeroy', 
-                    fillcolor='rgba(0, 242, 255, 0.1)'
-                ))
+    if not data_bs:
+        st.info("⏳ Calculando...")
+    else:
+        from scipy.stats import norm as sp_norm
 
-                # Put en Rosa con Relleno
-                fig_opt.add_trace(go.Scatter(
-                    x=st_range, y=payoff_put, 
-                    name="Long Put", 
-                    line=dict(color="#ED1E79", width=3),
-                    fill='tozeroy',
-                    fillcolor='rgba(237, 30, 121, 0.1)'
-                ))
+        col1, col2 = st.columns([1, 1.5])
+        with col1:
+            st.markdown("### 💲 Primas")
+            c_call, c_put = st.columns(2)
+            c_call.metric("Call Price", f"USD {data_bs['precios']['call']:.4f}")
+            c_put.metric("Put Price", f"USD {data_bs['precios']['put']:.4f}")
 
-                # Línea de equilibrio
-                fig_opt.add_hline(y=0, line_color="#94a3b8", line_width=1, line_dash="dash")
-                
-                # --- SOLUCIÓN AL ERROR: Aplicamos el layout en dos pasos ---
-                
-                # Paso 1: Aplicamos el diseño base de tu función maestra
-                fig_opt.update_layout(
-                    **plotly_layout(
-                        "Perfil de Beneficios al Vencimiento", 
-                        height=400, 
-                        xaxis_title="Precio Activo Subyacente", 
-                        yaxis_title="Pérdida / Ganancia"
-                    )
-                )
-                
-                # Paso 2: Aplicamos los ajustes de color que querías sin repetir el nombre del parámetro
-                fig_opt.update_layout(
-                    title_font=dict(color='#CBD5E1', size=20), # Color de título mejorado
-                    xaxis=dict(title_font=dict(color='#94a3b8'), gridcolor="#334155"),
-                    yaxis=dict(title_font=dict(color='#94a3b8'), gridcolor="#334155")
-                )
-                
-                st.plotly_chart(fig_opt, use_container_width=True)
+            st.markdown("### 📊 Griegas")
+            g = data_bs["greeks"]
+            g1, g2 = st.columns(2)
+            g1.metric("Delta (Call)", f"{g['delta_call']:.4f}")
+            g1.metric("Gamma", f"{g['gamma']:.6f}")
+            g2.metric("Vega", f"{g['vega']:.4f}")
+            g2.metric("Theta (Call)", f"{g['theta_call']:.4f}")
 
-                st.divider()
-            st.markdown("### 📊 Visualizaciones")
-            
-            spots = np.linspace(S * 0.5, S * 1.5, 100)
-            
-            col1, col2 = st.columns(2)
-            
-            # 1. Payoff a vencimiento
-            with col1:
-                payoff_call = np.maximum(spots - K, 0)
-                payoff_put = np.maximum(K - spots, 0)
-                fig_payoff = go.Figure()
-                fig_payoff.add_trace(go.Scatter(x=spots, y=payoff_call, name="Call", line=dict(color="#10b981", width=2)))
-                fig_payoff.add_trace(go.Scatter(x=spots, y=payoff_put, name="Put", line=dict(color="#ef4444", width=2)))
-                fig_payoff.add_vline(x=K, line_dash="dash", annotation_text=f"K={K}")
-                fig_payoff.update_layout(title="Payoff a Vencimiento", xaxis_title="Precio Spot", yaxis_title="Payoff ($)", height=320)
-                st.plotly_chart(fig_payoff, use_container_width=True)
+            with st.expander("ℹ️ Interpretación de Griegas"):
+                st.markdown(f"""
+                - **Delta {g['delta_call']:.3f}:** por cada USD 1 que sube el subyacente, la Call sube USD {g['delta_call']:.3f}.
+                - **Gamma {g['gamma']:.5f}:** velocidad de cambio del Delta. Alto cerca del Strike.
+                - **Vega {g['vega']:.3f}:** sensibilidad a la volatilidad. Por cada 1% más de σ, la prima cambia USD {g['vega']*0.01:.4f}.
+                - **Theta {g['theta_call']:.3f}:** pérdida de valor por día que pasa (tiempo).
+                """)
 
-            # 2. Precio de la opción hoy vs spot
-            with col2:
-                from scipy.stats import norm as sp_norm
-                precios_call = []
-                for s in spots:
-                    if s <= 0: precios_call.append(0); continue
-                    d1 = (np.log(s/K) + (r_opt + sigma**2/2)*T) / (sigma*np.sqrt(T))
-                    d2 = d1 - sigma*np.sqrt(T)
-                    precios_call.append(s*sp_norm.cdf(d1) - K*np.exp(-r_opt*T)*sp_norm.cdf(d2))
-                intrinseco = np.maximum(spots - K, 0)
-                fig_precio = go.Figure()
-                fig_precio.add_trace(go.Scatter(x=spots, y=precios_call, name="Precio Call BS", line=dict(color="#6366f1", width=2)))
-                fig_precio.add_trace(go.Scatter(x=spots, y=intrinseco, name="Valor Intrínseco", line=dict(dash="dot", color="#f59e0b")))
-                fig_precio.add_vline(x=S, line_dash="dash", annotation_text=f"S actual={S}")
-                fig_precio.update_layout(title="Precio Call vs Spot", xaxis_title="Precio Spot", yaxis_title="Precio ($)", height=320)
-                st.plotly_chart(fig_precio, use_container_width=True)
+        with col2:
+            st.markdown("### 📈 Perfil de Beneficios al Vencimiento")
+            st_range = np.linspace(S*0.5, S*1.5, 100)
+            payoff_call = np.maximum(st_range - K, 0) - data_bs['precios']['call']
+            payoff_put = np.maximum(K - st_range, 0) - data_bs['precios']['put']
 
-            # 3. Delta vs Spot para distintos T
-            fig_delta = go.Figure()
-            for t_val, color in [(0.25, "#ef4444"), (0.5, "#f59e0b"), (1.0, "#10b981"), (2.0, "#6366f1")]:
-                deltas = []
-                for s in spots:
-                    if s <= 0: deltas.append(0); continue
-                    d1 = (np.log(s/K) + (r_opt + sigma**2/2)*t_val) / (sigma*np.sqrt(t_val))
-                    deltas.append(sp_norm.cdf(d1))
-                fig_delta.add_trace(go.Scatter(x=spots, y=deltas, name=f"T={t_val}a", line=dict(color=color, width=2)))
-            fig_delta.add_vline(x=K, line_dash="dash", annotation_text=f"K={K}")
-            fig_delta.update_layout(title="Delta Call vs Spot (distintos T)", xaxis_title="Precio Spot", yaxis_title="Delta", height=350)
-            st.plotly_chart(fig_delta, use_container_width=True)
+            fig_opt = go.Figure()
+            fig_opt.add_trace(go.Scatter(
+                x=st_range, y=payoff_call, name="Long Call",
+                line=dict(color="#00f2ff", width=3),
+                fill='tozeroy', fillcolor='rgba(0,242,255,0.1)'
+            ))
+            fig_opt.add_trace(go.Scatter(
+                x=st_range, y=payoff_put, name="Long Put",
+                line=dict(color="#ED1E79", width=3),
+                fill='tozeroy', fillcolor='rgba(237,30,121,0.1)'
+            ))
+            fig_opt.add_hline(y=0, line_color="#94a3b8", line_width=1, line_dash="dash")
+            fig_opt.add_vline(x=K, line_dash="dot", line_color="#f59e0b",
+                            annotation_text=f"K={K:.0f}")
+            fig_opt.add_vline(x=S, line_dash="dot", line_color="#10b981",
+                            annotation_text=f"S={S:.0f}")
+            try:
+                fig_opt.update_layout(**plotly_layout(
+                    "Perfil de Beneficios", height=380,
+                    xaxis_title="Precio Subyacente", yaxis_title="P&G"))
+            except:
+                fig_opt.update_layout(title="Perfil", height=380)
+            st.plotly_chart(fig_opt, use_container_width=True)
 
+        st.divider()
+        st.markdown("### 📊 Análisis de Sensibilidad")
+        spots = np.linspace(S * 0.5, S * 1.5, 100)
+
+        col_a, col_b = st.columns(2)
+        with col_a:
+            payoff_c = np.maximum(spots - K, 0)
+            payoff_p = np.maximum(K - spots, 0)
+            fig_payoff = go.Figure()
+            fig_payoff.add_trace(go.Scatter(x=spots, y=payoff_c, name="Call",
+                line=dict(color="#10b981", width=2)))
+            fig_payoff.add_trace(go.Scatter(x=spots, y=payoff_p, name="Put",
+                line=dict(color="#ef4444", width=2)))
+            fig_payoff.add_vline(x=K, line_dash="dash", annotation_text=f"K={K:.0f}")
+            try:
+                fig_payoff.update_layout(**plotly_layout("Payoff a Vencimiento", height=300,
+                    xaxis_title="Precio Spot", yaxis_title="Payoff"))
+            except:
+                fig_payoff.update_layout(title="Payoff", height=300)
+            st.plotly_chart(fig_payoff, use_container_width=True)
+
+        with col_b:
+            precios_call = []
+            for s in spots:
+                if s <= 0: precios_call.append(0); continue
+                d1 = (np.log(s/K) + (r_opt + sigma**2/2)*T) / (sigma*np.sqrt(T))
+                d2 = d1 - sigma*np.sqrt(T)
+                precios_call.append(s*sp_norm.cdf(d1) - K*np.exp(-r_opt*T)*sp_norm.cdf(d2))
+            intrinseco = np.maximum(spots - K, 0)
+            fig_precio = go.Figure()
+            fig_precio.add_trace(go.Scatter(x=spots, y=precios_call, name="Precio Call BS",
+                line=dict(color="#6366f1", width=2)))
+            fig_precio.add_trace(go.Scatter(x=spots, y=intrinseco, name="Valor Intrínseco",
+                line=dict(dash="dot", color="#f59e0b")))
+            fig_precio.add_vline(x=S, line_dash="dash", annotation_text=f"S={S:.0f}")
+            try:
+                fig_precio.update_layout(**plotly_layout("Precio Call vs Spot", height=300,
+                    xaxis_title="Precio Spot", yaxis_title="Precio"))
+            except:
+                fig_precio.update_layout(title="Precio Call", height=300)
+            st.plotly_chart(fig_precio, use_container_width=True)
+
+        # Delta vs Spot para distintos T
+        fig_delta = go.Figure()
+        for t_val, color in [(0.25, "#ef4444"), (0.5, "#f59e0b"), (1.0, "#10b981"), (2.0, "#6366f1")]:
+            deltas = []
+            for s in spots:
+                if s <= 0: deltas.append(0); continue
+                d1 = (np.log(s/K) + (r_opt + sigma**2/2)*t_val) / (sigma*np.sqrt(t_val))
+                deltas.append(sp_norm.cdf(d1))
+            fig_delta.add_trace(go.Scatter(x=spots, y=deltas, name=f"T={t_val}a",
+                line=dict(color=color, width=2)))
+        fig_delta.add_vline(x=K, line_dash="dash", annotation_text=f"K={K:.0f}")
+        fig_delta.add_vline(x=S, line_dash="dot", line_color="#10b981",
+                          annotation_text=f"S={S:.0f}")
+        try:
+            fig_delta.update_layout(**plotly_layout("Delta Call vs Spot (distintos horizontes)",
+                height=350, xaxis_title="Precio Spot", yaxis_title="Delta"))
+        except:
+            fig_delta.update_layout(title="Delta", height=350)
+        st.plotly_chart(fig_delta, use_container_width=True)
 
 
 # ═══════════════════ MÓD 11 — STRESS ═══════════════════
@@ -1559,113 +1582,277 @@ with tabs[10]:
 with tabs[11]:
     st.subheader("💥 Análisis de Escenarios Extremos (Stress Test)")
     st.warning("Evaluación del impacto del portafolio ante eventos de 'Cisne Negro' históricos y catastróficos.")
-    
-    if st.button("🔄 Ejecutar Simulación de Crisis", key="btn_m11"):
-        if "stress_test" not in st.session_state:
-            with st.spinner("Ejecutando simulación de crisis..."):
-                st.session_state["stress_test"] = api_get("/analisis/stress-test")
-        data_st = st.session_state.get("stress_test")    
 
-        if data_st:
-            # 1. Gráfico de Impacto Global
-            df_st = pd.DataFrame(data_st["escenarios"])
-            df_st["Impacto USD"] = df_st["impacto_portafolio"] * valor_portafolio
-            
-            fig_st = px.bar(df_st, x="escenario", y="Impacto USD", color="impacto_portafolio",
-                           color_continuous_scale="RdYlGn", title="Impacto Monetario por Escenario")
-            st.plotly_chart(fig_st, use_container_width=True)
+    # Carga automática
+    cache_key_st = f"stress_{'_'.join(tickers)}"
+    if cache_key_st not in st.session_state:
+        with st.spinner("Ejecutando simulación de crisis..."):
+            resultado_st = api_get("/analisis/stress-test")
+            if resultado_st:
+                st.session_state[cache_key_st] = resultado_st
 
-            # 2. Tarjetas Detalladas
-            st.markdown("#### 🚨 Detalle de Supervivencia")
-            grid = st.columns(3)
-            for i, esc in enumerate(data_st["escenarios"]):
-                with grid[i % 3]:
-                    impacto_pct = esc["impacto_portafolio"] * 100
-                    impacto_usd = esc["impacto_portafolio"] * valor_portafolio
-                    
-                    # Estilo según gravedad
-                    bg_color = "rgba(239,68,68,0.1)" if impacto_pct < -5 else "rgba(245,158,11,0.1)"
-                    border_color = "#ef4444" if impacto_pct < -5 else "#f59e0b"
-                    
-                    st.markdown(f"""
-                        <div style="background:{bg_color}; border: 1px solid {border_color}; padding: 15px; border-radius: 10px;">
-                            <h4 style="margin:0; font-size:14px;">{esc['escenario']}</h4>
-                            <p style="font-size:24px; font-weight:bold; margin:5px 0;">{impacto_pct:.2f}%</p>
-                            <p style="margin:0; color:{border_color};">Impacto: -${abs(impacto_usd):,.0f}</p>
-                        </div>
-                    """, unsafe_allow_html=True)
-                    st.write("") # Espaciador
-            
-            # Heatmap activo × escenario
-            st.markdown("#### 🗺️ Heatmap de Sensibilidad: Activo × Escenario")
-            escenarios = data_st["escenarios"]
-            nombres_esc = [e["escenario"] for e in escenarios]
-            activos_hm = list(escenarios[0].get("impactos_por_activo", {}).keys()) if escenarios else []
-                
-            if activos_hm:
-                matriz = [[e.get("impactos_por_activo", {}).get(a, 0) * 100 for e in escenarios] for a in activos_hm]
-                fig_hm = go.Figure(data=go.Heatmap(
-                    z=matriz, x=nombres_esc, y=activos_hm,
-                    colorscale="RdYlGn", zmid=0,
-                    text=[[f"{v:.1f}%" for v in row] for row in matriz],
-                    texttemplate="%{text}", colorbar=dict(title="Impacto %"),
-                ))
-                fig_hm.update_layout(title="Impacto % por Activo y Escenario", height=350)
-                st.plotly_chart(fig_hm, use_container_width=True)
+    data_st = st.session_state.get(cache_key_st)
 
+    if not data_st:
+        st.info("⏳ Ve primero al **Tab 1** para cargar los datos del portafolio.")
+    else:
+        escenarios = data_st["escenarios"]
+        df_st = pd.DataFrame(escenarios)
+        df_st["Impacto USD"] = df_st["impacto_portafolio"] * valor_portafolio
+        df_st["Impacto %"] = df_st["impacto_portafolio"] * 100
+
+        # ── Métricas resumen ──
+        st.markdown("### 📊 Resumen de Impacto")
+        peor = df_st.loc[df_st["impacto_portafolio"].idxmin()]
+        mejor = df_st.loc[df_st["impacto_portafolio"].idxmax()]
+        promedio = df_st["impacto_portafolio"].mean()
+
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Peor Escenario", peor["escenario"],
+                  delta=f"{peor['Impacto %']:.2f}%", delta_color="inverse")
+        m2.metric("Pérdida Máxima",
+                  f"USD {abs(peor['Impacto USD']):,.0f}",
+                  delta=f"{peor['Impacto %']:.2f}%", delta_color="inverse")
+        m3.metric("Escenario Menos Severo", mejor["escenario"],
+                  delta=f"{mejor['Impacto %']:.2f}%", delta_color="inverse")
+        m4.metric("Impacto Promedio",
+                  f"{promedio*100:.2f}%",
+                  delta_color="inverse")
+
+        st.divider()
+
+        # ── Gráfico de barras ──
+        fig_st = go.Figure()
+        colors = ["#ef4444" if v < -0.05 else "#f59e0b" if v < 0 else "#10b981"
+                  for v in df_st["impacto_portafolio"]]
+        fig_st.add_trace(go.Bar(
+            x=df_st["escenario"],
+            y=df_st["Impacto USD"],
+            marker_color=colors,
+            text=df_st["Impacto %"].round(2).astype(str) + "%",
+            textposition="outside",
+        ))
+        fig_st.add_hline(y=0, line_color="#94a3b8", line_width=1)
+        try:
+            fig_st.update_layout(**plotly_layout(
+                "Impacto Monetario por Escenario de Crisis",
+                height=420,
+                xaxis_title="Escenario",
+                yaxis_title="Impacto (USD)"
+            ))
+        except:
+            fig_st.update_layout(title="Stress Test", height=420)
+        st.plotly_chart(fig_st, use_container_width=True)
+
+        st.divider()
+
+        # ── Tarjetas detalladas ──
+        st.markdown("### 🚨 Detalle por Escenario")
+        grid = st.columns(3)
+        for i, esc in enumerate(escenarios):
+            impacto_pct = esc["impacto_portafolio"] * 100
+            impacto_usd = esc["impacto_portafolio"] * valor_portafolio
+
+            if impacto_pct < -10:
+                bg_color = "rgba(239,68,68,0.15)"
+                border_color = "#ef4444"
+                nivel = "🔴 CRÍTICO"
+            elif impacto_pct < -5:
+                bg_color = "rgba(245,158,11,0.15)"
+                border_color = "#f59e0b"
+                nivel = "🟡 SEVERO"
+            else:
+                bg_color = "rgba(16,185,129,0.10)"
+                border_color = "#10b981"
+                nivel = "🟢 MODERADO"
+
+            with grid[i % 3]:
+                st.markdown(f"""
+                    <div style="background:{bg_color}; border: 1px solid {border_color};
+                                padding: 15px; border-radius: 10px; margin-bottom: 10px;">
+                        <span style="font-size:11px; font-weight:600; color:{border_color};">{nivel}</span>
+                        <h4 style="margin:4px 0; font-size:13px;">{esc['escenario']}</h4>
+                        <p style="font-size:26px; font-weight:bold; margin:5px 0; color:{border_color};">
+                            {impacto_pct:.2f}%</p>
+                        <p style="margin:0; font-size:13px;">
+                            Pérdida: USD {abs(impacto_usd):,.0f}</p>
+                    </div>
+                """, unsafe_allow_html=True)
+
+        st.divider()
+
+        # ── Heatmap ──
+        st.markdown("### 🗺️ Heatmap: Activo × Escenario")
+        nombres_esc = [e["escenario"] for e in escenarios]
+        activos_hm = list(escenarios[0].get("impactos_por_activo", {}).keys()) if escenarios else []
+
+        if activos_hm:
+            matriz = [[e.get("impactos_por_activo", {}).get(a, 0) * 100
+                       for e in escenarios] for a in activos_hm]
+            fig_hm = go.Figure(data=go.Heatmap(
+                z=matriz, x=nombres_esc, y=activos_hm,
+                colorscale="RdYlGn", zmid=0,
+                text=[[f"{v:.1f}%" for v in row] for row in matriz],
+                texttemplate="%{text}",
+                colorbar=dict(title="Impacto %"),
+            ))
+            try:
+                fig_hm.update_layout(**plotly_layout(
+                    "Sensibilidad por Activo y Escenario", height=380))
+            except:
+                fig_hm.update_layout(title="Heatmap", height=380)
+            st.plotly_chart(fig_hm, use_container_width=True)
+
+        with st.expander("ℹ️ Interpretación del Stress Test"):
+            st.markdown(f"""
+            - **🔴 CRÍTICO (< -10%):** escenarios catastróficos como crisis financieras globales o pandemias.
+            - **🟡 SEVERO (-5% a -10%):** correcciones importantes del mercado o shocks sectoriales.
+            - **🟢 MODERADO (> -5%):** impacto contenido gracias a la diversificación del portafolio.
+            - **Peor escenario:** **{peor['escenario']}** con una pérdida de **USD {abs(peor['Impacto USD']):,.0f}** ({peor['Impacto %']:.2f}%).
+            - El heatmap muestra qué activos son más vulnerables en cada crisis histórica.
+            """)
 
 # ═══════════════════ ML ═══════════════════
 
 with tabs[12]:
     st.subheader("🤖 Inteligencia Artificial — Predicción de Tendencia")
-    
+    st.info("Random Forest Classifier predice si el precio de mañana subirá o bajará basado en indicadores técnicos.", icon="🧠")
+
     with st.container(border=True):
-        col1, col2 = st.columns([1, 1.5])
-        
+        col1, col2 = st.columns([1, 1])
+
         with col1:
             st.markdown("### 🏋️ Entrenamiento")
+
+            # Entrenar ticker individual
             ticker_ml = st.selectbox("Activo a entrenar", tickers, key="ml_t")
             if st.button("Entrenar Modelo RF", key="btn_ml_t", use_container_width=True):
-                with st.spinner("Entrenando Random Forest..."):
+                with st.spinner(f"Entrenando Random Forest para {ticker_ml}..."):
                     d = api_post(f"/ml/entrenar/{ticker_ml}")
-                if d: 
-                    st.success(f"Modelo Entrenado")
+                if d:
+                    st.session_state[f"ml_trained_{ticker_ml}"] = d
+                    st.success(f"✅ Modelo entrenado para {ticker_ml}")
                     st.metric("Precisión (Accuracy)", f"{d['accuracy']:.2%}")
+
+            st.divider()
+
+            # Entrenar todos
+            if st.button("🚀 Entrenar TODOS los activos", key="btn_ml_all", use_container_width=True, type="primary"):
+                progreso = st.progress(0, text="Iniciando entrenamiento...")
+                for i, t in enumerate(tickers):
+                    progreso.progress((i+1)/len(tickers), text=f"Entrenando {t}...")
+                    d = api_post(f"/ml/entrenar/{t}")
+                    if d:
+                        st.session_state[f"ml_trained_{t}"] = d
+                progreso.empty()
+                st.success(f"✅ Todos los modelos entrenados")
+
+                # Predecir todos automáticamente
+                progreso2 = st.progress(0, text="Generando predicciones...")
+                for i, t in enumerate(tickers):
+                    progreso2.progress((i+1)/len(tickers), text=f"Prediciendo {t}...")
+                    d_pred = api_post(f"/ml/predecir/{t}")
+                    if d_pred:
+                        st.session_state[f"ml_pred_{t}"] = d_pred
+                progreso2.empty()
+                st.success("✅ Predicciones generadas para todos los activos")
+                
+            # Mostrar precisiones guardadas
+            modelos_entrenados = [t for t in tickers if f"ml_trained_{t}" in st.session_state]
+            if modelos_entrenados:
+                st.markdown("#### 📊 Precisión por Activo")
+                for t in modelos_entrenados:
+                    acc = st.session_state[f"ml_trained_{t}"]["accuracy"]
+                    color = "🟢" if acc >= 0.6 else "🟡" if acc >= 0.5 else "🔴"
+                    st.write(f"{color} **{t}:** {acc:.2%}")
 
         with col2:
             st.markdown("### 🔮 Predicción")
+
             ticker_p = st.selectbox("Activo a predecir", tickers, key="ml_p")
+
+            # Verificar si está entrenado
+            if f"ml_trained_{ticker_p}" not in st.session_state:
+                st.warning(f"⚠️ Entrena el modelo de {ticker_p} primero.")
+            
             if st.button("Ejecutar Predicción", key="btn_ml_p", use_container_width=True):
-                d = api_post(f"/ml/predecir/{ticker_p}")
+                with st.spinner(f"Prediciendo {ticker_p}..."):
+                    d = api_post(f"/ml/predecir/{ticker_p}")
                 if d:
-                    prob = d['probabilidad']
-                    label = d['direccion'].upper()
-                    color = "#10b981" if label == "SUBE" else "#ef4444"
-                    
-                    # Gráfico de Gauge (Velocímetro)
-                    fig_gauge = go.Figure(go.Indicator(
-                        mode = "gauge+number",
-                        value = prob * 100,
-                        domain = {'x': [0, 1], 'y': [0, 1]},
-                        title = {'text': f"Confianza en: {label}"},
-                        gauge = {
-                            'axis': {'range': [0, 100]},
-                            'bar': {'color': color},
-                            'steps': [
-                                {'range': [0, 50], 'color': "lightgray"},
-                                {'range': [50, 100], 'color': "gray"}
-                            ]
+                    st.session_state[f"ml_pred_{ticker_p}"] = d
+
+            # Mostrar predicción guardada
+            pred = st.session_state.get(f"ml_pred_{ticker_p}")
+            if pred:
+                prob = pred['probabilidad']
+                label = pred['direccion'].upper()
+                color = "#10b981" if label == "SUBE" else "#ef4444"
+                emoji = "📈" if label == "SUBE" else "📉"
+
+                # Gauge
+                fig_gauge = go.Figure(go.Indicator(
+                    mode="gauge+number+delta",
+                    value=prob * 100,
+                    domain={'x': [0, 1], 'y': [0, 1]},
+                    title={'text': f"{emoji} Señal: {label}", 'font': {'size': 18}},
+                    delta={'reference': 50, 'increasing': {'color': "#10b981"},
+                           'decreasing': {'color': "#ef4444"}},
+                    gauge={
+                        'axis': {'range': [0, 100]},
+                        'bar': {'color': color},
+                        'steps': [
+                            {'range': [0, 40], 'color': "rgba(239,68,68,0.2)"},
+                            {'range': [40, 60], 'color': "rgba(245,158,11,0.2)"},
+                            {'range': [60, 100], 'color': "rgba(16,185,129,0.2)"},
+                        ],
+                        'threshold': {
+                            'line': {'color': "white", 'width': 3},
+                            'thickness': 0.75,
+                            'value': 50
                         }
-                    ))
-                    fig_gauge.update_layout(height=300, margin=dict(l=20, r=20, t=50, b=20))
-                    st.plotly_chart(fig_gauge, use_container_width=True)
+                    }
+                ))
+                fig_gauge.update_layout(height=280, margin=dict(l=20, r=20, t=60, b=20))
+                st.plotly_chart(fig_gauge, use_container_width=True)
+
+                # Precio actual y señal monetaria
+                precio_act = 100.0
+                try:
+                    p = cached_get(f"/precios/{ticker_p}")
+                    if p: precio_act = float(p[-1]["close"])
+                except: pass
+
+                confianza = "ALTA" if prob > 0.7 else "MEDIA" if prob > 0.55 else "BAJA"
+                st.markdown(f"""
+                **Precio actual {ticker_p}:** USD {precio_act:,.2f}  
+                **Señal:** {emoji} {label} con confianza **{confianza}** ({prob:.1%})
+                """)
+
+    # Predicciones de todos los activos entrenados
+    preds_guardadas = {t: st.session_state[f"ml_pred_{t}"]
+                       for t in tickers if f"ml_pred_{t}" in st.session_state}
+    if preds_guardadas:
+        st.divider()
+        st.markdown("### 📊 Resumen de Señales del Portafolio")
+        cols = st.columns(len(preds_guardadas))
+        for i, (t, p) in enumerate(preds_guardadas.items()):
+            label = p['direccion'].upper()
+            prob = p['probabilidad']
+            emoji = "📈" if label == "SUBE" else "📉"
+            color = "normal" if label == "SUBE" else "inverse"
+            with cols[i]:
+                st.metric(f"{emoji} {t}", label,
+                         delta=f"{prob:.1%} confianza",
+                         delta_color=color)
 
     with st.expander("🧠 ¿Cómo funciona este modelo?"):
         st.markdown("""
-        Este módulo utiliza un algoritmo de **Random Forest Classifier**. 
+        Este módulo utiliza un algoritmo de **Random Forest Classifier**.
         - **Entradas:** Precios históricos, volumen e indicadores técnicos (RSI, Medias Móviles).
-        - **Salida:** Clasifica si el precio de cierre de mañana será superior (**Sube**) o inferior (**Baja**) al de hoy.
+        - **Salida:** Clasifica si el precio de cierre de mañana será **superior (Sube)** o **inferior (Baja)** al de hoy.
         - **Probabilidad:** Indica qué tan seguro está el modelo de su decisión.
+        - **Confianza ALTA (>70%):** señal fuerte. **MEDIA (55-70%):** señal moderada. **BAJA (<55%):** señal débil.
+        - El modelo se re-entrena con los datos históricos disponibles en la BD cada vez que presionas entrenar.
         """)
 
 
