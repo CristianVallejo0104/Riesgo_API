@@ -1316,7 +1316,7 @@ with tabs[9]:
     with st.container(border=True):
         c1, c2, c3 = st.columns(3)
         tasa_cupon = c1.number_input("Tasa Cupón (anual)", value=0.05, step=0.01, format="%.2f")
-        vencimiento = c2.number_input("Vencimiento (años)", value=10, min_value=1, max_value=30)
+        vencimiento = c2.number_input("Vencimiento (años)", value=10, min_value=1, max_value=100)
         # Usamos la tasa de tu API Key de FRED
         tasa_desc = c3.number_input("Tasa Descuento (YTM)", value=tasa_fred, format="%.4f", 
                                    help="Tasa recuperada automáticamente de tu API de FRED")
