@@ -1208,46 +1208,104 @@ with tabs[7]:
 with tabs[8]:
     st.subheader("🌐 Contexto Macroeconómico y Benchmark")
 
-    if st.button("🔄 Cargar datos macro y benchmark", key="btn_m8"):
+    # Carga automática
+    cache_key_m8 = f"macro_{benchmark}"
+    if cache_key_m8 not in st.session_state:
         with st.spinner("Consultando FRED y calculando métricas..."):
             data_macro = api_get("/macro/")
             data_bench = api_get("/macro/benchmark", params={"benchmark": benchmark})
+            if data_macro and data_bench:
+                st.session_state[cache_key_m8] = {
+                    "macro": data_macro,
+                    "bench": data_bench,
+                }
 
-        if data_macro:
-            col1, col2 = st.columns(2)
-            with col1:
-                st.metric("Tasa Libre de Riesgo (FRED)", f"{data_macro['tasa_libre_riesgo']*100:.2f}%")
-            with col2:
-                st.metric("Inflación Anual USA (FRED)", f"{data_macro['inflacion_anual_pct']:.2f}%")
+    cached_m8 = st.session_state.get(cache_key_m8, {})
+    data_macro = cached_m8.get("macro")
+    data_bench = cached_m8.get("bench")
 
-            curva = data_macro["curva"]
-            df_curva = pd.DataFrame({"Plazo (años)": curva["plazos"], "Tasa (%)": curva["tasas"]})
-            fig_c = px.line(df_curva, x="Plazo (años)", y="Tasa (%)",
-                            title="Curva de Rendimiento USA (FRED)", markers=True)
-            st.plotly_chart(fig_c, use_container_width=True)
+    if not data_macro:
+        st.info("⏳ Cargando datos macroeconómicos...")
+    else:
+        # ── Métricas macro ──
+        st.markdown("### 📡 Indicadores Macroeconómicos USA (FRED)")
+        c1, c2 = st.columns(2)
+        c1.metric("Tasa Libre de Riesgo", f"{data_macro['tasa_libre_riesgo']*100:.2f}%",
+                  delta="Bonos del Tesoro USA")
+        c2.metric("Inflación Anual USA", f"{data_macro['inflacion_anual_pct']:.2f}%",
+                  delta="CPI")
+
+        # ── Curva de rendimientos ──
+        curva = data_macro["curva"]
+        df_curva = pd.DataFrame({
+            "Plazo (años)": curva["plazos"],
+            "Tasa (%)": curva["tasas"]
+        })
+
+        fig_c = go.Figure()
+        fig_c.add_trace(go.Scatter(
+            x=df_curva["Plazo (años)"], y=df_curva["Tasa (%)"],
+            mode="lines+markers",
+            line=dict(color="#3b82f6", width=3),
+            marker=dict(size=8, color="#1e40af"),
+            fill="tozeroy",
+            fillcolor="rgba(59,130,246,0.1)",
+            name="Tasa (%)"
+        ))
+        try:
+            fig_c.update_layout(**plotly_layout(
+                "Curva de Rendimiento USA (FRED)",
+                height=380,
+                xaxis_title="Plazo (años)",
+                yaxis_title="Tasa (%)"
+            ))
+        except:
+            fig_c.update_layout(title="Curva de Rendimiento", height=380)
+        st.plotly_chart(fig_c, use_container_width=True)
+
+        st.divider()
 
         if data_bench:
-            st.markdown(f"### 📊 Desempeño vs {benchmark}")
+            st.markdown(f"### 📊 Desempeño del Portafolio vs {benchmark}")
+
             c1, c2, c3, c4 = st.columns(4)
-            c1.metric("Tracking Error", f"{data_bench['tracking_error']*100:.2f}%")
-            c2.metric("Information Ratio", f"{data_bench['information_ratio']:.4f}")
-            c3.metric("Max Drawdown", f"{data_bench['max_drawdown']*100:.2f}%")
-            c4.metric("Sharpe Portafolio", f"{data_bench['sharpe_portafolio']:.4f}")
+            c1.metric("Tracking Error",
+                      f"{data_bench['tracking_error']*100:.2f}%",
+                      delta="Desviación vs benchmark")
+            c2.metric("Information Ratio",
+                      f"{data_bench['information_ratio']:.4f}",
+                      delta="Retorno activo / TE")
+            c3.metric("Max Drawdown",
+                      f"{data_bench['max_drawdown']*100:.2f}%",
+                      delta="Peor caída histórica",
+                      delta_color="inverse")
+            c4.metric("Sharpe Portafolio",
+                      f"{data_bench['sharpe_portafolio']:.4f}")
+
+            st.divider()
 
             col1, col2 = st.columns(2)
             with col1:
+                ret_port = data_bench['retorno_acumulado_portafolio'] * 100
+                ret_bench = data_bench['retorno_acumulado_benchmark'] * 100
+                diferencia = ret_port - ret_bench
                 st.metric("Retorno Acumulado Portafolio",
-                          f"{data_bench['retorno_acumulado_portafolio']*100:.2f}%")
+                          f"{ret_port:.2f}%",
+                          delta=f"{diferencia:+.2f}% vs {benchmark}",
+                          delta_color="normal" if diferencia >= 0 else "inverse")
             with col2:
                 st.metric(f"Retorno Acumulado {benchmark}",
-                          f"{data_bench['retorno_acumulado_benchmark']*100:.2f}%")
+                          f"{ret_bench:.2f}%")
 
-            with st.expander("ℹ️ Interpretación"):
+            with st.expander("ℹ️ Interpretación de métricas"):
                 st.markdown(f"""
-                - **Tracking Error:** desviación del portafolio respecto al benchmark. Menor = más alineado.
-                - **Information Ratio:** exceso de retorno por unidad de tracking error. Mayor = mejor gestión activa.
-                - **Max Drawdown:** mayor caída desde un pico. Mide el peor escenario histórico.
-                - **Alpha de Jensen:** ver módulo CAPM para el alpha ajustado por riesgo.
+                - **Tracking Error:** desviación del portafolio respecto al benchmark. 
+                  Valor actual **{data_bench['tracking_error']*100:.2f}%** — {"bajo, muy alineado al índice" if data_bench['tracking_error'] < 0.05 else "moderado, gestión activa"}.
+                - **Information Ratio:** exceso de retorno por unidad de tracking error. 
+                  {"Positivo ✅ — el portafolio supera al benchmark ajustado por riesgo." if data_bench['information_ratio'] > 0 else "Negativo ⚠️ — el portafolio rinde menos que el benchmark."}
+                - **Max Drawdown:** mayor caída desde un pico histórico. 
+                  Valor **{data_bench['max_drawdown']*100:.2f}%** — mide el peor escenario que vivió el portafolio.
+                - **Sharpe:** rendimiento ajustado por riesgo total. Mayor = mejor relación riesgo-retorno.
                 """)
 
 # ═══════════════════ MÓD 9 — RENTA FIJA ═══════════════════
