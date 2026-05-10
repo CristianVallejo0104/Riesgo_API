@@ -160,7 +160,41 @@ with st.sidebar:
                 st.warning(f"⚠️ Pesos suman {sum(pesos.values()):.2f}")
 
     st.markdown("---")
+    st.markdown("**📅 Período de Análisis**")
+    fecha_inicio = st.date_input(
+        "Fecha inicio",
+        value=pd.to_datetime("2020-01-01"),
+        max_value=pd.to_datetime("today"),
+        key="fecha_inicio_global"
+    )
+    fecha_fin = st.date_input(
+        "Fecha fin",
+        value=pd.to_datetime("today"),
+        min_value=fecha_inicio,
+        key="fecha_fin_global"
+    )
+    if fecha_inicio >= fecha_fin:
+        st.warning("⚠️ Fecha inicio debe ser menor que fecha fin.")
+    
+    fi = str(fecha_inicio)
+    ff = str(fecha_fin)
+
+    st.markdown("---")
     st.caption("**RiskLab USTA** · Teoría del Riesgo + Python APIs · CIII")
+
+
+# Limpiar cache cuando cambian las fechas o tickers
+_config_key = f"config_{'-'.join(tickers)}_{benchmark}_{fi}_{ff}"
+if st.session_state.get("_last_config") != _config_key:
+    # Limpiar todos los caches de análisis
+    keys_to_clear = [k for k in st.session_state.keys() 
+                     if any(k.startswith(p) for p in [
+                         "rend_", "vol_", "capm_", "var_", "markowitz_",
+                         "macro_", "stress_", "tab1_", "init_"
+                     ])]
+    for k in keys_to_clear:
+        del st.session_state[k]
+    st.session_state["_last_config"] = _config_key
 
 # ═══════════════════ HEADER ═══════════════════
 
@@ -250,7 +284,7 @@ with tabs[0]:
             st.success(f"✅ Portafolio inicializado — {len(tickers)} activos listos.")
             st.rerun()
 
-            
+
 # ═══════════════════ MÓD 1 — TÉCNICO ═══════════════════
 
 with tabs[1]:
@@ -382,21 +416,19 @@ with tabs[2]:
 
     # Precarga todos los tickers
     for _t in tickers:
-        _key = f"rend_{_t}"
+        _key = f"rend_{_t}_{fi}_{ff}"
         if _key not in st.session_state:
             _data = {
-                "stats": api_get(f"/analisis/rendimientos/{_t}"),
-                "serie": api_get(f"/analisis/rendimientos-serie/{_t}"),
+                "stats": api_get(f"/analisis/rendimientos/{_t}", params={"fecha_inicio": fi, "fecha_fin": ff}),
+                "serie": api_get(f"/analisis/rendimientos-serie/{_t}", params={"fecha_inicio": fi, "fecha_fin": ff}),
             }
-            if _data["stats"] and _data["serie"]:
-                st.session_state[_key] = _data
 
     # Acordeón por ticker
     st.markdown("### 📈 Análisis Individual por Activo")
     from scipy import stats as sp_stats
 
     for idx, t in enumerate(tickers):
-        datos = st.session_state.get(f"rend_{t}")
+        datos = st.session_state.get(f"rend_{t}_{fi}_{ff}")
         if not datos:
             continue
 
@@ -512,15 +544,15 @@ with tabs[3]:
     )
 
     # Carga automática para todos los tickers
-    cache_key_m3_all = f"vol_all_{'_'.join(tickers)}"
+    cache_key_m3_all = f"vol_all_{'_'.join(tickers)}_{fi}_{ff}"
     if cache_key_m3_all not in st.session_state:
         with st.spinner("Calculando modelos EWMA y GARCH para todos los activos..."):
             resultados_vol = {}
             for t in tickers:
                 safe_t = urllib.parse.quote(t, safe='')
                 resultados_vol[t] = {
-                    "ewma":    api_get(f"/analisis/ewma/{safe_t}"),
-                    "garch":   api_get(f"/analisis/garch/{safe_t}"),
+                    "ewma":    api_get(f"/analisis/ewma/{safe_t}", params={"fecha_inicio": fi, "fecha_fin": ff}),
+                    "garch":   api_get(f"/analisis/garch/{safe_t}", params={"fecha_inicio": fi, "fecha_fin": ff}),
                     "precios": cached_get(f"/precios/{safe_t}"),
                 }
             st.session_state[cache_key_m3_all] = resultados_vol
@@ -612,7 +644,7 @@ with tabs[4]:
         st.subheader("🎯 CAPM — Capital Asset Pricing Model")
         st.info("El CAPM determina el rendimiento esperado de un activo basado en su riesgo sistemático (Beta) frente al mercado.")
 
-        cache_key_m4 = f"capm_{'-'.join(tickers)}_{benchmark}"
+        cache_key_m4 = f"capm_{'-'.join(tickers)}_{benchmark}_{fi}_{ff}"
         if cache_key_m4 not in st.session_state:
             with st.spinner("Consultando FRED y calculando CAPM..."):
                 descargar_si_no_existe(benchmark)
@@ -626,7 +658,9 @@ with tabs[4]:
                 resultado = api_get("/analisis/capm", params={
                     "tickers": tickers,
                     "benchmark": benchmark,
-                    "tasa_libre_riesgo": rf_real
+                    "tasa_libre_riesgo": rf_real,
+                    "fecha_inicio": fi,
+                    "fecha_fin": ff,
                 })
                 if resultado:
                     st.session_state[cache_key_m4] = resultado
@@ -735,10 +769,10 @@ with tabs[5]:
     st.caption(f"**Confianza:** {confianza_var:.0%} | **Capital:** ${valor_portafolio:,.0f}")
 
     # ── VaR del Portafolio Completo (automático) ──
-    cache_key_vp = f"var_portafolio_{confianza_var}"
+    cache_key_vp = f"var_portafolio_{confianza_var}_{fi}_{ff}"
     if cache_key_vp not in st.session_state:
         with st.spinner("Calculando VaR del portafolio..."):
-            resultado_vp = api_get("/analisis/var-portafolio", params={"nivel": confianza_var})
+            resultado_vp = api_get("/analisis/var-portafolio", params={"nivel": confianza_var, "tickers": tickers, "fecha_inicio": fi, "fecha_fin": ff})
             if resultado_vp:
                 st.session_state[cache_key_vp] = resultado_vp
 
@@ -763,12 +797,12 @@ with tabs[5]:
 
     # Precarga todos
     for _t in tickers:
-        _key = f"var_{_t}_{confianza_var}"
+        _key = f"var_{_t}_{confianza_var}_{fi}_{ff}"
         if _key not in st.session_state:
             safe_t = urllib.parse.quote(_t, safe='')
             _data = {
-                "var":  api_get(f"/analisis/var/{safe_t}"),
-                "rend": st.session_state.get(f"rend_{_t}", {}).get("stats") or api_get(f"/analisis/rendimientos/{safe_t}"),
+                "var":  api_get(f"/analisis/var/{safe_t}", params={"fecha_inicio": fi, "fecha_fin": ff}),
+                "rend": api_get(f"/analisis/rendimientos/{safe_t}", params={"fecha_inicio": fi, "fecha_fin": ff}),
             }
             if _data["var"] and _data["rend"]:
                 st.session_state[_key] = _data
@@ -778,7 +812,7 @@ with tabs[5]:
                   delta=f"-${abs(val)*cap:,.0f}", delta_color="inverse")
 
     for idx, t in enumerate(tickers):
-        cache_key_t = f"var_{t}_{confianza_var}"
+        cache_key_t = f"var_{t}_{confianza_var}_{fi}_{ff}"
         datos = st.session_state.get(cache_key_t)
 
         with st.expander(f"🛡️ {t} — VaR y CVaR", expanded=(idx == 0)):
@@ -862,11 +896,15 @@ with tabs[6]:
     )
 
     # ── Controles ──
-    col_c1, col_c2 = st.columns(2)
+    col_c1, col_c2, col_c3, col_c4 = st.columns(4)
     with col_c1:
-        n_port = st.slider("Portafolios a simular (Monte Carlo)", 1000, 30000, 5000, step=1000, key="m6_slider_n")
+        n_port = st.slider("Portafolios a simular", 1000, 30000, 5000, step=1000, key="m6_slider_n")
     with col_c2:
         permitir_cortos = st.checkbox("Permitir ventas en corto", key="m6_cortos")
+    with col_c3:
+        fecha_inicio_mk = st.date_input("Fecha inicio", value=pd.to_datetime("2020-01-01"), key="mk_fi")
+    with col_c4:
+        fecha_fin_mk = st.date_input("Fecha fin", value=pd.to_datetime("today"), key="mk_ff")
 
     # ── Carga automática ──
     cache_key_m6 = f"markowitz_{'-'.join(tickers)}_{permitir_cortos}"
