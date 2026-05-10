@@ -131,7 +131,6 @@ with st.sidebar:
     if len(tickers) < 2:
         st.warning("⚠️ Selecciona al menos 2 activos.")
 
-    ticker_sel = st.selectbox("🔍 Ticker a analizar", tickers if tickers else ["AAPL"])
 
     benchmark = st.selectbox("📊 Benchmark",
         ["^GSPC", "^DJI", "^IXIC", "^RUT", "QQQ", "SPY"],
@@ -230,8 +229,28 @@ with tabs[0]:
             nombre = TICKERS_DB.get(t, t)
             st.write(f"**{t}** — {nombre}")
         st.info(f"Benchmark: **{benchmark}** | Inversión: **${valor_portafolio:,.0f}**")
+    st.divider()
+    st.markdown("### 🚀 Inicializar Portafolio")
+    
+    cache_key_init = f"init_{'_'.join(tickers)}_{benchmark}"
+    if cache_key_init in st.session_state:
+        st.success(f"✅ Portafolio inicializado — {len(tickers)} activos listos para análisis.")
+    else:
+        st.info("Descarga los datos del portafolio para habilitar todos los módulos.")
+        if st.button("🚀 Inicializar Portafolio", key="btn_init", type="primary"):
+            from concurrent.futures import ThreadPoolExecutor
+            todos = tickers + [benchmark]
+            progreso = st.progress(0, text="Iniciando descarga...")
+            for i, t in enumerate(todos):
+                progreso.progress((i+1)/len(todos), text=f"Descargando {t}...")
+                descargar_si_no_existe(t)
+            progreso.empty()
+            st.session_state[cache_key_init] = True
+            st.session_state[f"tab1_descargado_{'_'.join(tickers)}"] = True
+            st.success(f"✅ Portafolio inicializado — {len(tickers)} activos listos.")
+            st.rerun()
 
-
+            
 # ═══════════════════ MÓD 1 — TÉCNICO ═══════════════════
 
 with tabs[1]:
@@ -239,10 +258,11 @@ with tabs[1]:
 
     # Descarga inicial
     if f"tab1_descargado_{'_'.join(tickers)}" not in st.session_state:
-        with st.spinner("Descargando precios de todos los activos..."):
-            for t in tickers:
-                descargar_si_no_existe(t)
-            descargar_si_no_existe(benchmark)
+        with st.spinner("Descargando precios de todos los activos en paralelo..."):
+            from concurrent.futures import ThreadPoolExecutor
+            todos = tickers + [benchmark]
+            with ThreadPoolExecutor(max_workers=6) as executor:
+                executor.map(descargar_si_no_existe, todos)
         st.session_state[f"tab1_descargado_{'_'.join(tickers)}"] = True
 
     # Gráfico comparativo base 100
@@ -1429,7 +1449,8 @@ with tabs[10]:
     # Precio actual del ticker seleccionado
     precio_actual = 100.0
     try:
-        precios_opt = cached_get(f"/precios/{ticker_sel}")
+        ticker_opt = st.selectbox("Activo subyacente", tickers, key="opt_ticker")
+        precios_opt = cached_get(f"/precios/{ticker_opt}")
         if precios_opt and len(precios_opt) > 0:
             precio_actual = float(precios_opt[-1]["close"])
     except:
@@ -1437,7 +1458,7 @@ with tabs[10]:
 
     # ── Parámetros ──
     with st.container(border=True):
-        st.caption(f"💡 Precio actual de **{ticker_sel}**: USD {precio_actual:,.2f} | Tasa FRED: {tasa_fred_local*100:.2f}%")
+        st.caption(f"💡 Precio actual de **{ticker_opt}**: USD {precio_actual:,.2f}...")
         c1, c2, c3, c4, c5 = st.columns(5)
         S = c1.number_input("Precio Spot (S)", value=round(precio_actual, 2), min_value=0.01, step=5.0)
         K = c2.number_input("Strike (K)", value=round(precio_actual, 2), min_value=0.01, step=5.0)
