@@ -257,6 +257,40 @@ def var_portafolio(db: DBSession, nivel: float = 0.95,
         "nivel_confianza": nivel,
     }
 
+@router.get("/markowitz", response_model=MarkowitzResponse)
+def optimizar_portafolio(
+    db: DBSession,
+    permitir_cortos: bool = False,
+    tickers: list[str] = Query(default=None),
+    fecha_inicio: str = Query(default=None),
+    fecha_fin: str = Query(default=None),
+):
+    if not tickers:
+        tickers = settings.default_tickers
+
+    rendimientos = {}
+    for ticker in tickers:
+        try:
+            df = _obtener_precios_df(ticker, db)  # sin filtro de fecha
+            rendimientos[ticker] = np.log(df["close"] / df["close"].shift(1)).dropna()
+        except:
+            continue
+
+    if len(rendimientos) < 2:
+        raise HTTPException(
+            status_code=400,
+            detail="No hay suficientes datos para calcular la frontera eficiente."
+        )
+
+    df_rend = pd.DataFrame(rendimientos).dropna()
+    servicio = PortfolioService(df_rend)
+
+    return {
+        "tickers": list(rendimientos.keys()),
+        "optimizacion": servicio.optimizar_markowitz(permitir_cortos),
+        "frontera": servicio.frontera_eficiente(n_puntos=20),
+    }
+
 
 @router.get("/alertas")
 def obtener_alertas(db: DBSession,
