@@ -307,6 +307,9 @@ with tabs[1]:
         if r_p and len(r_p) > 0:
             df_t = pd.DataFrame(r_p)
             df_t["fecha"] = pd.to_datetime(df_t["fecha"])
+            df_t = df_t[(df_t["fecha"] >= pd.to_datetime(fi)) & (df_t["fecha"] <= pd.to_datetime(ff))]
+            if len(df_t) == 0:
+                continue
             df_t["norm"] = df_t["close"] / df_t["close"].iloc[0] * 100
             fig_comp.add_trace(go.Scatter(x=df_t["fecha"], y=df_t["norm"], name=t))
     fig_comp.update_layout(height=400,
@@ -318,7 +321,7 @@ with tabs[1]:
     st.markdown("### 🕯️ Análisis Individual por Activo")
 
     for idx, t in enumerate(tickers):
-        data_ind = cached_get(f"/analisis/indicadores/{t}")
+        data_ind = api_get(f"/analisis/indicadores/{t}", params={"fecha_inicio": fi, "fecha_fin": ff})
         r_precios = cached_get(f"/precios/{t}")
 
         with st.expander(f"📈 {t} — Velas e Indicadores Técnicos", expanded=(idx == 0)):
@@ -400,7 +403,7 @@ with tabs[2]:
     st.markdown("### 📊 Comparativa de Volatilidad — Todos los Activos")
     fig_box = go.Figure()
     for t in tickers:
-        serie_box = st.session_state.get(f"rend_{t}", {}).get("serie")
+        serie_box = st.session_state.get(f"rend_{t}_{fi}_{ff}", {}).get("serie")
         if not serie_box:
             serie_box = api_get(f"/analisis/rendimientos-serie/{t}")
         if serie_box:
@@ -896,21 +899,18 @@ with tabs[6]:
     )
 
     # ── Controles ──
-    col_c1, col_c2, col_c3, col_c4 = st.columns(4)
+    col_c1, col_c2 = st.columns(2)
     with col_c1:
         n_port = st.slider("Portafolios a simular", 1000, 30000, 5000, step=1000, key="m6_slider_n")
     with col_c2:
         permitir_cortos = st.checkbox("Permitir ventas en corto", key="m6_cortos")
-    with col_c3:
-        fecha_inicio_mk = st.date_input("Fecha inicio", value=pd.to_datetime("2020-01-01"), key="mk_fi")
-    with col_c4:
-        fecha_fin_mk = st.date_input("Fecha fin", value=pd.to_datetime("today"), key="mk_ff")
+    
 
     # ── Carga automática ──
-    cache_key_m6 = f"markowitz_{'-'.join(tickers)}_{permitir_cortos}"
+    cache_key_m6 = f"markowitz_{'-'.join(tickers)}_{permitir_cortos}_{fi}_{ff}"
     if cache_key_m6 not in st.session_state:
         with st.spinner("Calculando frontera eficiente y descargando precios..."):
-            data_m = api_get("/analisis/markowitz", params={"permitir_cortos": permitir_cortos})
+            data_m = api_get("/analisis/markowitz", params={"permitir_cortos": permitir_cortos, "tickers": tickers, "fecha_inicio": fi, "fecha_fin": ff})
             precios_dict = {}
             for t in tickers:
                 safe_t = urllib.parse.quote(t, safe='')
