@@ -163,7 +163,7 @@ with st.sidebar:
     st.markdown("**📅 Período de Análisis**")
     fecha_inicio = st.date_input(
         "Fecha inicio",
-        value=pd.to_datetime("2020-01-01"),
+        value=(pd.to_datetime("today")- pd.DateOffset(years=3)).date(),
         max_value=pd.to_datetime("today"),
         key="fecha_inicio_global"
     )
