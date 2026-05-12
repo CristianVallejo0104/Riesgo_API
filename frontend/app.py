@@ -912,6 +912,8 @@ with tabs[6]:
         n_port = st.slider("Portafolios a simular", 1000, 30000, 5000, step=1000, key="m6_slider_n")
     with col_c2:
         permitir_cortos = st.checkbox("Permitir ventas en corto", key="m6_cortos")
+        if permitir_cortos:
+            st.caption("⚠️ Modo experimental — la frontera puede ser aproximada con ventas en corto acotadas (máx. 20% por activo).")
     
 
     # ── Carga automática ──
@@ -975,12 +977,15 @@ with tabs[6]:
 
             for i in range(n_port):
                 if permitir_cortos:
-                    pesos = np.random.uniform(-1, 1.5, num_activos)
-                    while abs(np.sum(pesos)) < 0.1:
-                        pesos = np.random.uniform(-1, 1.5, num_activos)
+                    while True:
+                        pesos = np.random.uniform(-0.2, 1.2, num_activos)
+                        pesos /= np.sum(pesos)
+                        std_test = np.sqrt(np.dot(pesos.T, np.dot(cov_matrix, pesos)))
+                        if std_test < 0.60:
+                            break
                 else:
                     pesos = np.random.random(num_activos)
-                pesos /= np.sum(pesos)
+                    pesos /= np.sum(pesos)
                 retorno_port = np.sum(mean_returns * pesos)
                 std_port = np.sqrt(np.dot(pesos.T, np.dot(cov_matrix, pesos)))
                 sharpe_port = (retorno_port - rf_anual) / std_port if std_port > 0 else 0

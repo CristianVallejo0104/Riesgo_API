@@ -288,7 +288,7 @@ def optimizar_portafolio(
     return {
         "tickers": list(rendimientos.keys()),
         "optimizacion": servicio.optimizar_markowitz(permitir_cortos),
-        "frontera": servicio.frontera_eficiente(n_puntos=20),
+        "frontera": servicio.frontera_eficiente(n_puntos=20, permitir_cortos=permitir_cortos),
     }
 
 
