@@ -993,6 +993,44 @@ with tabs[6]:
                 resultados_sim[1, i] = retorno_port
                 resultados_sim[2, i] = sharpe_port
 
+        # ── Extender frontera con rango real del Monte Carlo ──
+        if permitir_cortos:
+            import scipy.optimize as sco
+            retorno_max_mc = float(resultados_sim[1].max())
+            retorno_min_mc = float(resultados_sim[1].min())
+            
+            cov_np = cov_matrix.values
+            mean_np = mean_returns.values
+            
+            frontera_ext = []
+            targets = np.linspace(retorno_min_mc, retorno_max_mc * 1.1, 50)
+
+            for target in targets:
+                def min_vol(p, cov=cov_np):
+                    return np.sqrt(np.dot(p.T, np.dot(cov, p)))
+                
+                constraints = [
+                    {'type': 'eq', 'fun': lambda p: np.sum(p) - 1},
+                    {'type': 'ineq', 'fun': lambda p, t=target, m=mean_np: m @ p - t}
+                ]
+                bounds = [(-0.2, 1.2)] * num_activos
+                
+                result = sco.minimize(min_vol,
+                    x0=np.ones(num_activos)/num_activos,
+                    method='SLSQP',
+                    bounds=bounds,
+                    constraints=constraints,
+                    options={'maxiter': 1000, 'ftol': 1e-9})
+                
+                if result.success and result.fun < 0.60:
+                    frontera_ext.append({
+                        "retorno": float(mean_np @ result.x),
+                        "riesgo": float(result.fun)
+                    })
+
+            if len(frontera_ext) >= 3:
+                frontera = pd.DataFrame(frontera_ext)
+
         fig_mk = go.Figure()
         fig_mk.add_trace(go.Scatter(
             x=resultados_sim[0] * 100, y=resultados_sim[1] * 100,
