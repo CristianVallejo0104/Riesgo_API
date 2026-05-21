@@ -909,7 +909,7 @@ with tabs[6]:
     # ── Controles ──
     col_c1, col_c2 = st.columns(2)
     with col_c1:
-        n_port = st.slider("Portafolios a simular", 1000, 30000, 5000, step=1000, key="m6_slider_n")
+        n_port = st.slider("Portafolios a simular", 1000, 30000, 1000, step=1000, key="m6_slider_n")
     with col_c2:
         permitir_cortos = st.checkbox("Permitir ventas en corto", key="m6_cortos")
         if permitir_cortos:
@@ -939,7 +939,7 @@ with tabs[6]:
     cached = st.session_state.get(cache_key_m6, {})
     data_m = cached.get("data_m")
     precios_dict = cached.get("precios_dict", {})
-
+    
     if not data_m or len(precios_dict) < 2:
         st.info("⏳ Ve primero al **Tab 1** para cargar los datos del portafolio.")
     elif "optimizacion" not in data_m:
@@ -1069,12 +1069,12 @@ with tabs[6]:
 
         try:
             fig_mk.update_layout(**plotly_layout(
-                "Modelo de Markowitz", height=580,
+                "Modelo de Markowitz", height=480,
                 xaxis_title="Volatilidad anualizada (%)",
                 yaxis_title="Rendimiento esperado (%)"
             ))
         except:
-            fig_mk.update_layout(title="Frontera de Markowitz", height=580)
+            fig_mk.update_layout(title="Frontera de Markowitz", height=400)
         st.plotly_chart(fig_mk, use_container_width=True)
 
         st.divider()
