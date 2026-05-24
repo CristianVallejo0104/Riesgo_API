@@ -1033,12 +1033,9 @@ with tabs[6]:
 
         fig_mk = go.Figure()
         # Filtrar portafolios por encima de la frontera
-        if not frontera.empty:
-            retorno_max_frontera = frontera["retorno"].max() * 1.02  # 2% de tolerancia
-            riesgo_min_frontera = frontera["riesgo"].min() * 0.98
-            mask = (resultados_sim[1] <= retorno_max_frontera) & \
-                (resultados_sim[0] >= riesgo_min_frontera)
-            resultados_sim = resultados_sim[:, mask]        
+        retorno_max_frontera = frontera["retorno"].max() if not frontera.empty else float('inf')
+        mask = resultados_sim[1] <= retorno_max_frontera
+        resultados_sim = resultados_sim[:, mask]
         fig_mk.add_trace(go.Scatter(
             x=resultados_sim[0] * 100, y=resultados_sim[1] * 100,
             mode="markers", name=f"{n_port:,} simulaciones",
