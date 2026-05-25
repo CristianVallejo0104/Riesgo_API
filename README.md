@@ -343,3 +343,23 @@ Este proyecto fue desarrollado con asistencia de **Claude (Anthropic)** como tut
 - Sugerencias de estructura y arquitectura
 
 Todo el código fue escrito, entendido y validado por el autor. La lógica financiera fue implementada siguiendo los contenidos del curso de Teoría del Riesgo.
+
+
+## 🧠 Configuración del Agente IA Local (Ollama)
+
+El módulo de Agente IA usa [Ollama](https://ollama.ai) con el modelo **llama3** corriendo localmente en `http://localhost:11434`.
+
+### 1. Instalar Ollama
+Descarga desde: https://ollama.ai/download
+
+### 2. Descargar el modelo
+```bash
+ollama pull llama3
+```
+
+### 3. Iniciar Ollama
+```bash
+ollama serve
+```
+
+> **Nota:** Con GPU dedicada (ej. RTX 3050) responde en ~5-10 segundos. Sin GPU puede tardar hasta 60 segundos usando CPU.
