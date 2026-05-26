@@ -101,13 +101,24 @@ TICKERS_DB = {
     "META": "Meta (Tech)", "NFLX": "Netflix (Tech)", "AMD": "AMD (Tech)",
     "JPM": "JPMorgan (Financiero)", "BAC": "Bank of America (Financiero)",
     "GS": "Goldman Sachs (Financiero)", "V": "Visa (Financiero)",
+    "MA": "Mastercard (Financiero)",
     "JNJ": "Johnson & Johnson (Salud)", "PFE": "Pfizer (Salud)",
-    "UNH": "UnitedHealth (Salud)", "MRK": "Merck (Salud)",
-    "XOM": "ExxonMobil (Energía)", "CVX": "Chevron (Energía)",
+    "UNH": "UnitedHealth (Salud)", "MRK": "Merck (Salud)", "ABBV": "AbbVie (Salud)",
+    "XOM": "ExxonMobil (Energía)", "CVX": "Chevron (Energía)", "COP": "ConocoPhillips (Energía)",
     "KO": "Coca-Cola (Consumo)", "PEP": "PepsiCo (Consumo)",
     "WMT": "Walmart (Consumo)", "MCD": "McDonald's (Consumo)",
-    "NKE": "Nike (Consumo)", "SBUX": "Starbucks (Consumo)",
+    "NKE": "Nike (Consumo)", "SBUX": "Starbucks (Consumo)", "PG": "P&G (Consumo)",
     "F": "Ford (Automotriz)", "GM": "General Motors (Automotriz)",
+    "TM": "Toyota (Automotriz)", "TSM": "TSMC (Tech)",
+    "ASML": "ASML (Tech)", "SAP": "SAP (Tech)",
+    "BABA": "Alibaba (Tech)", "TCEHY": "Tencent (Tech)",
+    "BRK-B": "Berkshire (Financiero)", "HD": "Home Depot (Consumo)",
+    "CRM": "Salesforce (Tech)", "ADBE": "Adobe (Tech)",
+    "INTC": "Intel (Tech)", "QCOM": "Qualcomm (Tech)",
+    "TXN": "Texas Instruments (Tech)", "PYPL": "PayPal (Financiero)",
+    "SHOP": "Shopify (Tech)", "SPOT": "Spotify (Tech)",
+    "ABNB": "Airbnb (Consumo)", "UBER": "Uber (Tech)",
+    "005930.KS": "Samsung (Tech)",
 }
 
 # ═══════════════════ SIDEBAR ═══════════════════
@@ -121,17 +132,17 @@ with st.sidebar:
         st.session_state["tickers_seleccionados"] = ["AAPL", "JPM", "JNJ", "XOM", "KO"]
 
     # Añadir nuevos tickers del buscador al TICKERS_DB
-    if "tickers_extra" in st.session_state:
-        for t in st.session_state["tickers_extra"]:
-            if t not in TICKERS_DB:
-                TICKERS_DB[t] = f"{t} (Personalizado)"
+    for t in st.session_state.get("tickers_extra", []):
+        if t not in st.session_state["tickers_seleccionados"]:
+            st.session_state["tickers_seleccionados"].append(t)
+        if t not in TICKERS_DB:
+            TICKERS_DB[t] = f"{t} (Personalizado)"
 
     tickers = st.multiselect(
-        "📦 Tickers del portafolio",
-        options=list(TICKERS_DB.keys()),
-        default=st.session_state["tickers_seleccionados"],
-        format_func=lambda t: f"{t} — {TICKERS_DB[t]}",
-        key="multiselect_tickers"
+    "📦 Tickers del portafolio",
+    options=list(TICKERS_DB.keys()),
+    default=st.session_state["tickers_seleccionados"],
+    format_func=lambda t: f"{t} — {TICKERS_DB[t]}",
     )
 
     # Sincronizar
@@ -207,7 +218,7 @@ with st.sidebar:
             if st.button("➕ Añadir", key="btn_add_empresa"):
                 if ticker_encontrado not in st.session_state["tickers_seleccionados"]:
                     if ticker_encontrado not in TICKERS_DB:
-                        TICKERS_DB[ticker_encontrado] = empresa_busqueda
+                        TICKERS_DB[ticker_encontrado] = f"{ticker_encontrado} (Personalizado)"
                     st.session_state["tickers_seleccionados"].append(ticker_encontrado)
                     if "tickers_extra" not in st.session_state:
                         st.session_state["tickers_extra"] = []
