@@ -122,11 +122,93 @@ with st.sidebar:
         format_func=lambda t: f"{t} — {TICKERS_DB[t]}",
     )
 
-    ticker_custom = st.text_input("➕ Agregar ticker personalizado", placeholder="Ej: TSM, BABA",
-                                   help="Escríbelo aquí separado por comas.")
-    if ticker_custom.strip():
-        extras = [t.strip().upper() for t in ticker_custom.split(",") if t.strip()]
-        tickers = tickers + [t for t in extras if t not in tickers]
+    # ── Diccionario de búsqueda por nombre de empresa ──
+    EMPRESAS_BUSQUEDA = {
+        "Apple Inc.": "AAPL",
+        "Microsoft Corporation": "MSFT",
+        "NVIDIA Corporation": "NVDA",
+        "Alphabet Inc. (Google)": "GOOGL",
+        "Amazon.com Inc.": "AMZN",
+        "Tesla Inc.": "TSLA",
+        "Meta Platforms Inc.": "META",
+        "Netflix Inc.": "NFLX",
+        "AMD — Advanced Micro Devices": "AMD",
+        "JPMorgan Chase & Co.": "JPM",
+        "Bank of America": "BAC",
+        "Goldman Sachs Group": "GS",
+        "Visa Inc.": "V",
+        "Mastercard Inc.": "MA",
+        "Johnson & Johnson": "JNJ",
+        "Pfizer Inc.": "PFE",
+        "UnitedHealth Group": "UNH",
+        "Merck & Co.": "MRK",
+        "AbbVie Inc.": "ABBV",
+        "ExxonMobil Corporation": "XOM",
+        "Chevron Corporation": "CVX",
+        "ConocoPhillips": "COP",
+        "Coca-Cola Company": "KO",
+        "PepsiCo Inc.": "PEP",
+        "Walmart Inc.": "WMT",
+        "McDonald's Corporation": "MCD",
+        "Nike Inc.": "NKE",
+        "Starbucks Corporation": "SBUX",
+        "Ford Motor Company": "F",
+        "General Motors": "GM",
+        "Toyota Motor Corporation": "TM",
+        "Samsung Electronics": "005930.KS",
+        "Taiwan Semiconductor (TSMC)": "TSM",
+        "ASML Holding": "ASML",
+        "SAP SE": "SAP",
+        "Alibaba Group": "BABA",
+        "Tencent Holdings": "TCEHY",
+        "Berkshire Hathaway": "BRK-B",
+        "Procter & Gamble": "PG",
+        "Home Depot": "HD",
+        "Salesforce Inc.": "CRM",
+        "Adobe Inc.": "ADBE",
+        "Intel Corporation": "INTC",
+        "Qualcomm Inc.": "QCOM",
+        "Texas Instruments": "TXN",
+        "PayPal Holdings": "PYPL",
+        "Shopify Inc.": "SHOP",
+        "Spotify Technology": "SPOT",
+        "Airbnb Inc.": "ABNB",
+        "Uber Technologies": "UBER",
+    }
+
+    st.markdown("**🔍 Buscar empresa**")
+    empresa_busqueda = st.selectbox(
+        "Escribe nombre o ticker",
+        options=["— Buscar empresa —"] + sorted(EMPRESAS_BUSQUEDA.keys()),
+        key="buscador_empresa",
+        help="Escribe el nombre de la empresa y selecciónala"
+    )
+
+    if empresa_busqueda != "— Buscar empresa —":
+        ticker_encontrado = EMPRESAS_BUSQUEDA[empresa_busqueda]
+        col1, col2 = st.columns([2, 1])
+        with col1:
+            st.success(f"**{ticker_encontrado}** — {empresa_busqueda}")
+        with col2:
+            if st.button("➕ Añadir", key="btn_add_empresa"):
+                if ticker_encontrado not in tickers:
+                    tickers = list(tickers) + [ticker_encontrado]
+                    if ticker_encontrado not in TICKERS_DB:
+                        TICKERS_DB[ticker_encontrado] = empresa_busqueda
+                    st.rerun()
+                else:
+                    st.warning("Ya está en el portafolio")
+
+    # Campo manual para tickers no en el diccionario
+    with st.expander("✏️ Ingresar ticker manualmente"):
+        ticker_custom = st.text_input(
+            "Ticker exacto",
+            placeholder="Ej: TSM, BABA",
+            help="Para empresas no encontradas en el buscador"
+        )
+        if ticker_custom.strip():
+            extras = [t.strip().upper() for t in ticker_custom.split(",") if t.strip()]
+            tickers = tickers + [t for t in extras if t not in tickers]
 
     if len(tickers) < 2:
         st.warning("⚠️ Selecciona al menos 2 activos.")
