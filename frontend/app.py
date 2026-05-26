@@ -116,12 +116,26 @@ with st.sidebar:
     st.markdown("## ⚙️ Configuración")
     st.markdown("---")
 
+        # Inicializar session_state para tickers
+    if "tickers_seleccionados" not in st.session_state:
+        st.session_state["tickers_seleccionados"] = ["AAPL", "JPM", "JNJ", "XOM", "KO"]
+
+    # Añadir nuevos tickers del buscador al TICKERS_DB
+    if "tickers_extra" in st.session_state:
+        for t in st.session_state["tickers_extra"]:
+            if t not in TICKERS_DB:
+                TICKERS_DB[t] = f"{t} (Personalizado)"
+
     tickers = st.multiselect(
-        "📦 Tickers del portafolio", options=list(TICKERS_DB.keys()),
-        default=["AAPL", "JPM", "JNJ", "XOM", "KO"],
+        "📦 Tickers del portafolio",
+        options=list(TICKERS_DB.keys()),
+        default=st.session_state["tickers_seleccionados"],
         format_func=lambda t: f"{t} — {TICKERS_DB[t]}",
+        key="multiselect_tickers"
     )
 
+    # Sincronizar
+    st.session_state["tickers_seleccionados"] = tickers
     # ── Diccionario de búsqueda por nombre de empresa ──
     EMPRESAS_BUSQUEDA = {
         "Apple Inc.": "AAPL",
@@ -191,10 +205,13 @@ with st.sidebar:
             st.success(f"**{ticker_encontrado}** — {empresa_busqueda}")
         with col2:
             if st.button("➕ Añadir", key="btn_add_empresa"):
-                if ticker_encontrado not in tickers:
-                    tickers = list(tickers) + [ticker_encontrado]
+                if ticker_encontrado not in st.session_state["tickers_seleccionados"]:
                     if ticker_encontrado not in TICKERS_DB:
                         TICKERS_DB[ticker_encontrado] = empresa_busqueda
+                    st.session_state["tickers_seleccionados"].append(ticker_encontrado)
+                    if "tickers_extra" not in st.session_state:
+                        st.session_state["tickers_extra"] = []
+                    st.session_state["tickers_extra"].append(ticker_encontrado)
                     st.rerun()
                 else:
                     st.warning("Ya está en el portafolio")
