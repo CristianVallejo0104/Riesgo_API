@@ -1,0 +1,11 @@
+.git
+.github
+.venv
+__pycache__
+*.pyc
+.pytest_cache
+.streamlit/secrets.toml
+backend/.env
+backend/.pytest_cache
+backend/app/**/__pycache__
+frontend/**/__pycache__

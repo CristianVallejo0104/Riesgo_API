@@ -1,3 +1,5 @@
+import re
+
 from databricks import sql
 
 from app.config import get_settings
@@ -15,6 +17,7 @@ CONSULTAS_PREDEFINIDAS = {
                 ROUND(MIN(close), 2) AS cierre_minimo,
                 ROUND(MAX(close), 2) AS cierre_maximo
             FROM risklab_prices
+            {ticker_where}
             GROUP BY ticker
             ORDER BY cierre_promedio DESC
         """,
@@ -29,6 +32,7 @@ CONSULTAS_PREDEFINIDAS = {
                 ROUND(AVG(close), 2) AS cierre_promedio,
                 COUNT(*) AS registros
             FROM risklab_prices
+            {ticker_where}
             GROUP BY ticker
             ORDER BY desviacion_cierre DESC
         """,
@@ -43,6 +47,7 @@ CONSULTAS_PREDEFINIDAS = {
                 ROUND(MAX(close), 2) AS maximo,
                 ROUND(MAX(close) - MIN(close), 2) AS rango
             FROM risklab_prices
+            {ticker_where}
             GROUP BY ticker
             ORDER BY rango DESC
         """,
@@ -54,6 +59,7 @@ CONSULTAS_PREDEFINIDAS = {
             WITH ultimos AS (
                 SELECT ticker, MAX(fecha) AS fecha
                 FROM risklab_prices
+                {ticker_where}
                 GROUP BY ticker
             )
             SELECT
@@ -78,6 +84,7 @@ CONSULTAS_PREDEFINIDAS = {
                 ROUND(MAX(close), 2) AS maximo_30d
             FROM risklab_prices
             WHERE fecha >= DATE_SUB((SELECT MAX(fecha) FROM risklab_prices), 30)
+            {ticker_and}
             GROUP BY ticker
             ORDER BY fluctuacion_pct ASC
             LIMIT 5
@@ -92,6 +99,7 @@ CONSULTAS_PREDEFINIDAS = {
                 ROUND(AVG(volume), 0) AS volumen_promedio,
                 ROUND(MAX(volume), 0) AS volumen_maximo
             FROM risklab_prices
+            {ticker_where}
             GROUP BY ticker
             ORDER BY volumen_promedio DESC
             LIMIT 10
@@ -109,6 +117,7 @@ CONSULTAS_PREDEFINIDAS = {
                     ROW_NUMBER() OVER (PARTITION BY ticker ORDER BY fecha ASC) AS rn_asc,
                     ROW_NUMBER() OVER (PARTITION BY ticker ORDER BY fecha DESC) AS rn_desc
                 FROM risklab_prices
+                {ticker_where}
             ),
             extremos AS (
                 SELECT
@@ -135,6 +144,7 @@ CONSULTAS_PREDEFINIDAS = {
                 SELECT *
                 FROM risklab_prices
                 WHERE fecha >= DATE_SUB((SELECT MAX(fecha) FROM risklab_prices), 30)
+                {ticker_and}
             ),
             ordenado AS (
                 SELECT
@@ -172,6 +182,7 @@ CONSULTAS_PREDEFINIDAS = {
                 MIN(fecha) AS fecha_inicial,
                 MAX(fecha) AS fecha_final
             FROM risklab_prices
+            {ticker_where}
             GROUP BY ticker
             ORDER BY dias_disponibles DESC, ticker
         """,
@@ -185,10 +196,24 @@ CONSULTAS_PREDEFINIDAS = {
                 ROUND(AVG(high - low), 3) AS rango_intradia_promedio,
                 ROUND(AVG((high - low) / close) * 100, 3) AS rango_intradia_pct
             FROM risklab_prices
+            {ticker_where}
             GROUP BY ticker
             ORDER BY rango_intradia_pct ASC
         """,
     },
+}
+
+
+TICKER_PATTERN = re.compile(r"^[A-Z0-9.\-^=]{1,20}$")
+CONSULTAS_FILTRABLES_POR_TICKER = {
+    "promedio_cierre",
+    "desviacion_cierre",
+    "minimos_maximos",
+    "menor_fluctuacion_mes",
+    "mayor_volumen_promedio",
+    "rendimiento_periodo",
+    "ultimo_mes_retorno",
+    "dias_disponibles",
 }
 
 
@@ -261,19 +286,48 @@ class DatabricksService:
                 "id": consulta_id,
                 "titulo": datos["titulo"],
                 "descripcion": datos["descripcion"],
-                "sql": datos["sql"].strip(),
+                "sql": self._render_sql(datos["sql"]),
+                "soporta_filtro_tickers": consulta_id in CONSULTAS_FILTRABLES_POR_TICKER,
             }
             for consulta_id, datos in CONSULTAS_PREDEFINIDAS.items()
         ]
 
-    def ejecutar_consulta(self, consulta_id: str) -> dict:
+    def _normalizar_tickers(self, tickers: list[str] | None) -> list[str]:
+        tickers_limpios = []
+        for ticker in tickers or []:
+            ticker_limpio = ticker.strip().upper()
+            if not ticker_limpio:
+                continue
+            if not TICKER_PATTERN.match(ticker_limpio):
+                raise ValueError(f"Ticker no valido para consulta Databricks: {ticker}")
+            if ticker_limpio not in tickers_limpios:
+                tickers_limpios.append(ticker_limpio)
+        return tickers_limpios
+
+    def _ticker_clauses(self, tickers: list[str] | None) -> dict[str, str]:
+        tickers_limpios = self._normalizar_tickers(tickers)
+        if not tickers_limpios:
+            return {"ticker_where": "", "ticker_and": ""}
+
+        valores = ", ".join(f"'{ticker}'" for ticker in tickers_limpios)
+        return {
+            "ticker_where": f"WHERE ticker IN ({valores})",
+            "ticker_and": f"AND ticker IN ({valores})",
+        }
+
+    def _render_sql(self, sql_template: str, tickers: list[str] | None = None) -> str:
+        return sql_template.format(**self._ticker_clauses(tickers)).strip()
+
+    def ejecutar_consulta(self, consulta_id: str, tickers: list[str] | None = None) -> dict:
         if consulta_id not in CONSULTAS_PREDEFINIDAS:
             raise ValueError(f"Consulta predefinida no existe: {consulta_id}")
 
         consulta = CONSULTAS_PREDEFINIDAS[consulta_id]
+        sql_renderizado = self._render_sql(consulta["sql"], tickers)
+        tickers_limpios = self._normalizar_tickers(tickers)
         with self._connect() as conn:
             with conn.cursor() as cursor:
-                cursor.execute(consulta["sql"])
+                cursor.execute(sql_renderizado)
                 columns = [col[0] for col in cursor.description]
                 rows = cursor.fetchall()
 
@@ -288,6 +342,7 @@ class DatabricksService:
             "id": consulta_id,
             "titulo": consulta["titulo"],
             "descripcion": consulta["descripcion"],
-            "sql": consulta["sql"].strip(),
+            "sql": sql_renderizado,
+            "tickers": tickers_limpios,
             "resultados": resultados,
         }

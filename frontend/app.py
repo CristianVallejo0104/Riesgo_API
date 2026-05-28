@@ -163,7 +163,64 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-API = os.getenv("BACKEND_URL", "http://127.0.0.1:8000")
+def _risklab_health(api_base: str):
+    try:
+        response = requests.get(f"{api_base}/health", timeout=1.5)
+        response.raise_for_status()
+        data = response.json()
+        if data.get("app") == "RiskLab USTA API":
+            return data
+    except (requests.RequestException, ValueError):
+        return None
+    return None
+
+
+@st.cache_data(ttl=30, show_spinner=False)
+def resolve_api_url():
+    explicit_api = os.getenv("BACKEND_URL")
+    if explicit_api:
+        return explicit_api.rstrip("/")
+
+    local_candidates = [
+        "http://127.0.0.1:8000",
+        "http://127.0.0.1:8015",
+        "http://127.0.0.1:8014",
+        "http://127.0.0.1:8013",
+        "http://127.0.0.1:8012",
+        "http://127.0.0.1:8011",
+        "http://127.0.0.1:8010",
+        "http://127.0.0.1:8016",
+        "http://127.0.0.1:8017",
+        "http://127.0.0.1:8018",
+        "http://127.0.0.1:8019",
+        "http://127.0.0.1:8020",
+    ]
+
+    detected_risklab = []
+    detected_databricks = []
+    for api_base in local_candidates:
+        if not _risklab_health(api_base):
+            continue
+
+        detected_risklab.append(api_base)
+        try:
+            databricks_response = requests.get(f"{api_base}/databricks/consultas", timeout=1.5)
+            if databricks_response.status_code != 404:
+                detected_databricks.append(api_base)
+                consultas = databricks_response.json().get("consultas", [])
+                if any(consulta.get("soporta_filtro_tickers") for consulta in consultas):
+                    return api_base
+        except requests.RequestException:
+            pass
+        except ValueError:
+            pass
+
+    if detected_databricks:
+        return detected_databricks[0]
+    return detected_risklab[0] if detected_risklab else "http://127.0.0.1:8000"
+
+
+API = resolve_api_url()
 
 # ═══════════════════ HELPERS ═══════════════════
 
@@ -179,7 +236,7 @@ def api_get(ep, params=None, timeout=120):
         r.raise_for_status()
         return r.json()
     except requests.exceptions.ConnectionError:
-        st.error("❌ Backend no disponible. Asegúrate de que corre en :8000")
+        st.error(f"❌ Backend no disponible en {API}. Verifica que FastAPI esté corriendo.")
         return None
     except requests.exceptions.HTTPError as e:
         st.error(f"❌ Error {e.response.status_code}: {api_error_detail(e.response)}")
@@ -195,7 +252,7 @@ def api_post(ep, body=None):
     try:
         r = requests.post(f"{API}{ep}", json=body or {}, timeout=120); r.raise_for_status(); return r.json()
     except requests.exceptions.ConnectionError:
-        st.error("❌ Backend no disponible."); return None
+        st.error(f"❌ Backend no disponible en {API}. Verifica que FastAPI esté corriendo."); return None
     except requests.exceptions.HTTPError as e:
         st.error(f"❌ Error {e.response.status_code}: {api_error_detail(e.response)}"); return None
     except Exception as e:
@@ -282,6 +339,8 @@ TICKER_PRESETS = {
 
 with st.sidebar:
     st.markdown("## ⚙️ Configuración")
+    if not os.getenv("BACKEND_URL"):
+        st.caption(f"Backend local detectado: `{API}`")
     st.markdown("---")
 
         # Inicializar session_state para tickers
@@ -2514,33 +2573,48 @@ with tabs[13]:
             x=x_pos,
             y=[0] * len(nodos),
             mode="lines",
-            line=dict(color=escenario["color"], width=4),
+            line=dict(color=escenario["color"], width=5),
             hoverinfo="skip",
         ))
         fig_flujo.add_trace(go.Scatter(
             x=x_pos,
             y=[0] * len(nodos),
             mode="markers+text",
-            marker=dict(size=38, color=escenario["color"], line=dict(width=3, color="white")),
+            marker=dict(
+                size=42,
+                color=escenario["color"],
+                line=dict(width=4, color="white"),
+                symbol="circle",
+            ),
             text=[str(i + 1) for i in x_pos],
-            textfont=dict(color="white", size=14),
+            textfont=dict(color="white", size=15, family="Arial Black"),
             textposition="middle center",
             hovertext=nodos,
             hovertemplate="%{hovertext}<extra></extra>",
         ))
+        for x, nodo in zip(x_pos, nodos):
+            fig_flujo.add_annotation(
+                x=x,
+                y=-0.18,
+                text=f"<b>{nodo}</b>",
+                showarrow=False,
+                font=dict(size=11, color="#475569"),
+                align="center",
+            )
         fig_flujo.update_layout(
-            height=190,
-            margin=dict(l=20, r=20, t=15, b=55),
-            paper_bgcolor="rgba(0,0,0,0)",
-            plot_bgcolor="rgba(0,0,0,0)",
+            height=210,
+            margin=dict(l=20, r=20, t=20, b=65),
+            paper_bgcolor="rgba(255,255,255,0)",
+            plot_bgcolor="rgba(255,255,255,0)",
             showlegend=False,
-            xaxis=dict(
-                tickmode="array", tickvals=x_pos, ticktext=nodos,
-                showgrid=False, zeroline=False, tickfont=dict(size=11),
-            ),
-            yaxis=dict(visible=False, range=[-0.2, 0.2]),
+            xaxis=dict(visible=False, range=[-0.35, len(nodos) - 0.65]),
+            yaxis=dict(visible=False, range=[-0.28, 0.16]),
         )
-        st.plotly_chart(fig_flujo, use_container_width=True)
+        st.plotly_chart(
+            fig_flujo,
+            use_container_width=True,
+            config={"displayModeBar": False, "staticPlot": False},
+        )
 
         for numero, (titulo, detalle) in enumerate(escenario["etapas"], start=1):
             with st.expander(f"{numero}. {titulo}", expanded=numero == 1):
@@ -2588,15 +2662,19 @@ with tabs[13]:
             st.markdown("#### Evidencia en la base de datos")
             tablas = pd.DataFrame(
                 [
-                    {"Tabla": "assets", "Rol": "Catálogo de tickers", "Interviene": recorrido != "Análisis de riesgo"},
-                    {"Tabla": "prices", "Rol": "Históricos OHLCV", "Interviene": True},
-                    {"Tabla": "portfolios", "Rol": "Asignación y pesos", "Interviene": False},
-                    {"Tabla": "prediction_logs", "Rol": "Salida de ML", "Interviene": False},
-                    {"Tabla": "signals_log", "Rol": "Alertas técnicas", "Interviene": False},
-                    {"Tabla": "risklab_prices", "Rol": "Tabla cloud en Databricks", "Interviene": recorrido == "Consulta cloud Databricks"},
+                    {"Tabla": "assets", "Rol": "Catálogo de tickers", "Participa en esta ruta": recorrido != "Análisis de riesgo"},
+                    {"Tabla": "prices", "Rol": "Históricos OHLCV", "Participa en esta ruta": True},
+                    {"Tabla": "portfolios", "Rol": "Asignación y pesos", "Participa en esta ruta": False},
+                    {"Tabla": "prediction_logs", "Rol": "Salida de ML", "Participa en esta ruta": False},
+                    {"Tabla": "signals_log", "Rol": "Alertas técnicas", "Participa en esta ruta": False},
+                    {
+                        "Tabla": "risklab_prices",
+                        "Rol": "Tabla cloud usada solo en el recorrido Databricks",
+                        "Participa en esta ruta": recorrido == "Consulta cloud Databricks",
+                    },
                 ]
             )
-            tablas["Interviene"] = tablas["Interviene"].map({True: "Sí", False: "No"})
+            tablas["Participa en esta ruta"] = tablas["Participa en esta ruta"].map({True: "Sí", False: "No"})
             st.dataframe(tablas, use_container_width=True, hide_index=True)
 
             with st.expander("Modelos ORM verificados"):
@@ -2612,11 +2690,6 @@ with tabs[13]:
                     '    close = mapped_column(Float)',
                     language="python",
                 )
-
-        st.success(
-            f"En este recorrido, {'Databricks SQL actúa como **capa cloud de consulta**' if recorrido == 'Consulta cloud Databricks' else 'SQLite actúa como **' + ('cache persistente' if recorrido == 'Persistencia desde Yahoo' else 'fuente local de datos') + '**'} "
-            f"y la interfaz termina mostrando: **{escenario['presentacion']}**."
-        )
 
     with infraestructura_tab:
         col_docker, col_bricks = st.columns(2)
@@ -2701,12 +2774,87 @@ with tabs[13]:
             key="consulta_databricks_sql",
         )
         consulta_sel = consulta_map[consulta_titulo]
+        consultas_con_filtro = {
+            "promedio_cierre",
+            "desviacion_cierre",
+            "minimos_maximos",
+            "menor_fluctuacion_mes",
+            "mayor_volumen_promedio",
+            "rendimiento_periodo",
+            "ultimo_mes_retorno",
+            "dias_disponibles",
+        }
+        permite_filtro_ticker = consulta_sel["id"] in consultas_con_filtro
+        tickers_consulta = []
+
+        if permite_filtro_ticker:
+            opciones_ticker_sql = sorted(set(TICKERS_DB.keys()) | set(tickers))
+            default_ticker_sql = [t for t in tickers if t in opciones_ticker_sql][:5]
+            if not default_ticker_sql and "AAPL" in opciones_ticker_sql:
+                default_ticker_sql = ["AAPL"]
+
+            tickers_consulta = st.multiselect(
+                "Activos para esta consulta",
+                options=opciones_ticker_sql,
+                default=default_ticker_sql,
+                format_func=lambda t: f"{t} — {TICKERS_DB.get(t, t)}",
+                help="Puedes escoger uno o varios activos. FastAPI enviará esos tickers a Databricks como filtro SQL.",
+                key=f"tickers_databricks_{consulta_sel['id']}",
+            )
+            st.caption(
+                "La consulta se ejecutará solo sobre los activos seleccionados; "
+                "si eliges varios, compara sus resultados en la misma tabla."
+            )
+
+        def preview_sql_filtrado(sql_base, consulta_id, tickers_elegidos):
+            if not tickers_elegidos or consulta_id not in consultas_con_filtro:
+                return sql_base
+
+            valores = ", ".join(f"'{ticker}'" for ticker in tickers_elegidos)
+            filtro = f"ticker IN ({valores})"
+
+            if consulta_id in {"menor_fluctuacion_mes", "ultimo_mes_retorno"}:
+                return sql_base.replace(
+                    "WHERE fecha >= DATE_SUB((SELECT MAX(fecha) FROM risklab_prices), 30)",
+                    "WHERE fecha >= DATE_SUB((SELECT MAX(fecha) FROM risklab_prices), 30)"
+                    f"\n            AND {filtro}",
+                    1,
+                )
+
+            if consulta_id == "rendimiento_periodo":
+                return sql_base.replace(
+                    "FROM risklab_prices",
+                    f"FROM risklab_prices\n                WHERE {filtro}",
+                    1,
+                )
+
+            return sql_base.replace(
+                "FROM risklab_prices",
+                f"FROM risklab_prices\n            WHERE {filtro}",
+                1,
+            )
+
+        resultado_previo_sql = st.session_state.get("resultado_databricks_sql")
+        sql_mostrado = preview_sql_filtrado(
+            consulta_sel["sql"],
+            consulta_sel["id"],
+            tickers_consulta,
+        )
+        if (
+            resultado_previo_sql
+            and resultado_previo_sql.get("id") == consulta_sel["id"]
+            and (
+                not permite_filtro_ticker
+                or resultado_previo_sql.get("tickers", []) == tickers_consulta
+            )
+        ):
+            sql_mostrado = resultado_previo_sql.get("sql", sql_mostrado)
 
         sql_col, resultado_col = st.columns([1, 1.25])
         with sql_col:
             st.markdown(f"**{consulta_sel['titulo']}**")
             st.caption(consulta_sel["descripcion"])
-            st.code(consulta_sel["sql"], language="sql")
+            st.code(sql_mostrado, language="sql")
 
         with resultado_col:
             if consulta_sel.get("demo"):
@@ -2720,18 +2868,47 @@ with tabs[13]:
                     """
                 )
             else:
-                if st.button("▶ Ejecutar consulta en Databricks", key="btn_run_databricks_sql", type="primary"):
-                    st.session_state["resultado_databricks_sql"] = api_get(
+                params_sql = {"tickers": tickers_consulta} if tickers_consulta else None
+                filtro_activo = tickers_consulta if permite_filtro_ticker else []
+
+                if permite_filtro_ticker and not tickers_consulta:
+                    st.warning("Selecciona al menos un activo para ejecutar esta consulta filtrada.")
+
+                if st.button(
+                    "▶ Ejecutar consulta en Databricks",
+                    key="btn_run_databricks_sql",
+                    type="primary",
+                    disabled=permite_filtro_ticker and not tickers_consulta,
+                ):
+                    respuesta_databricks = api_get(
                         f"/databricks/consultas/{consulta_sel['id']}",
+                        params=params_sql,
                         timeout=120,
                     )
+                    st.session_state["resultado_databricks_sql"] = respuesta_databricks
 
                 resultado_sql = st.session_state.get("resultado_databricks_sql")
-                if resultado_sql and resultado_sql.get("id") == consulta_sel["id"]:
+                resultado_tickers = resultado_sql.get("tickers", []) if resultado_sql else []
+                misma_consulta = resultado_sql and resultado_sql.get("id") == consulta_sel["id"]
+                filtro_coincide = (
+                    not permite_filtro_ticker
+                    or not resultado_tickers
+                    or resultado_tickers == filtro_activo
+                )
+                if misma_consulta and filtro_coincide:
                     df_sql = pd.DataFrame(resultado_sql.get("resultados", []))
+                    if permite_filtro_ticker and tickers_consulta and "ticker" in df_sql.columns:
+                        df_sql = df_sql[df_sql["ticker"].isin(tickers_consulta)]
                     if df_sql.empty:
                         st.info("La consulta no devolvió filas.")
                     else:
+                        if resultado_tickers:
+                            st.caption(f"Filtro aplicado: {', '.join(resultado_tickers)}")
+                        elif permite_filtro_ticker and tickers_consulta:
+                            st.caption(
+                                "Filtro aplicado en la visualización: "
+                                f"{', '.join(tickers_consulta)}. Reinicia FastAPI para que Databricks ejecute el filtro directamente."
+                            )
                         numeric_cols = [
                             col for col in df_sql.columns
                             if pd.api.types.is_numeric_dtype(pd.to_numeric(df_sql[col], errors="coerce"))
@@ -2745,17 +2922,6 @@ with tabs[13]:
                         st.dataframe(df_sql, use_container_width=True, hide_index=True)
                 else:
                     st.info("Ejecuta la consulta para ver evidencia numérica desde Databricks.")
-
-        with st.expander("📌 Guion rápido para la presentación", expanded=True):
-            st.markdown(
-                f"**Caso seleccionado: {recorrido}.**\n\n"
-                f"1. Streamlit dispara `{escenario['metodo']} {escenario['endpoint']}`.\n"
-                f"2. FastAPI entrega una sesión SQLAlchemy y ejecuta **{escenario['accion']}**.\n"
-                f"3. La capa de datos participa sobre **{escenario['recurso']}** en {escenario.get('almacen', 'SQLite')}.\n"
-                f"4. La API devuelve **{escenario['salida']}** y el dashboard muestra **{escenario['presentacion']}**.\n"
-                "5. Docker empaqueta frontend y backend; Databricks queda como capa cloud opcional para consultas SQL."
-            )
-
 
 # ═══════════════════ AGENTE IA ═══════════════════
 

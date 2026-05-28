@@ -24,5 +24,3 @@ __pycache__/
 # VS Code
 .vscode/
 
-# Docker
-.dockerignore

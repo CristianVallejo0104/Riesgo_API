@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Query, status
 
 from app.services.databricks import DatabricksService
 
@@ -54,7 +54,10 @@ def listar_consultas_databricks():
 
 
 @router.get("/consultas/{consulta_id}")
-def ejecutar_consulta_databricks(consulta_id: str):
+def ejecutar_consulta_databricks(
+    consulta_id: str,
+    tickers: list[str] | None = Query(default=None),
+):
     servicio = DatabricksService()
     if not servicio.configurado():
         raise HTTPException(
@@ -63,7 +66,7 @@ def ejecutar_consulta_databricks(consulta_id: str):
         )
 
     try:
-        return servicio.ejecutar_consulta(consulta_id)
+        return servicio.ejecutar_consulta(consulta_id, tickers)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
     except Exception as exc:
