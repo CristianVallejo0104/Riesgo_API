@@ -37,3 +37,9 @@ def predecir(features: dict) -> float:
         "direccion": "sube" if prediccion == 1 else "baja",
         "probabilidad": round(float(max(probabilidad)), 4),
     }
+
+def resetear_modelo():
+    """Resetea el Singleton para forzar recarga del modelo desde disco."""
+    global _modelo
+    _modelo = None
+    logger.info("Singleton del modelo reseteado — se cargará el nuevo en la próxima predicción.")
