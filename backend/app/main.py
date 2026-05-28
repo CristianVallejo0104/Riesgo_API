@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
 from app.database import init_db   
-from app.routers import activos, portafolios, precios, analisis, fixed_income, options, ml, macro, agente
+from app.routers import activos, portafolios, precios, analisis, fixed_income, options, ml, macro, agente, databricks
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -44,3 +44,4 @@ app.include_router(options.router)
 app.include_router(ml.router)
 app.include_router(macro.router)
 app.include_router(agente.router)
+app.include_router(databricks.router)

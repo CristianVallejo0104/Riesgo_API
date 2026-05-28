@@ -32,9 +32,12 @@ class Settings(BaseSettings):
     fred_yield_curve_series: list[str] = ["DGS3MO", "DGS1", "DGS2", "DGS5", "DGS10", "DGS30"]
     ml_model_path: str = "app/ml/model.joblib"
     ml_model_version: str = "1.0.0"
+    databricks_server_hostname: str = ""
+    databricks_http_path: str = ""
+    databricks_token: str = ""
 
     cors_origins: list[str] = ["http://localhost:8501", "http://127.0.0.1:8501"]
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(env_file=(".env", "backend/.env"), env_file_encoding="utf-8", extra="ignore")
 
     @field_validator("debug", mode="before")
     @classmethod

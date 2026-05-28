@@ -245,6 +245,39 @@ TICKERS_DB = {
     "005930.KS": "Samsung (Tech)",
 }
 
+TICKERS_DB.update({
+    "ORCL": "Oracle (Tech)", "IBM": "IBM (Tech)", "NOW": "ServiceNow (Tech)",
+    "SNOW": "Snowflake (Tech)", "NET": "Cloudflare (Tech)", "DDOG": "Datadog (Tech)",
+    "AVGO": "Broadcom (Tech)", "MU": "Micron (Tech)", "LRCX": "Lam Research (Tech)",
+    "AMAT": "Applied Materials (Tech)", "CSCO": "Cisco (Tech)", "PANW": "Palo Alto Networks (Cybersecurity)",
+    "CRWD": "CrowdStrike (Cybersecurity)", "AXP": "American Express (Financiero)",
+    "MS": "Morgan Stanley (Financiero)", "C": "Citigroup (Financiero)", "BLK": "BlackRock (Financiero)",
+    "SCHW": "Charles Schwab (Financiero)", "TMO": "Thermo Fisher (Salud)", "LLY": "Eli Lilly (Salud)",
+    "NVO": "Novo Nordisk (Salud)", "ISRG": "Intuitive Surgical (Salud)", "GILD": "Gilead (Salud)",
+    "BMY": "Bristol Myers Squibb (Salud)", "SLB": "Schlumberger (Energía)", "EOG": "EOG Resources (Energía)",
+    "PSX": "Phillips 66 (Energía)", "VLO": "Valero (Energía)", "COST": "Costco (Consumo)",
+    "TGT": "Target (Consumo)", "LOW": "Lowe's (Consumo)", "DIS": "Disney (Consumo)",
+    "CMG": "Chipotle (Consumo)", "BKNG": "Booking Holdings (Consumo)", "LULU": "Lululemon (Consumo)",
+    "CAT": "Caterpillar (Industrial)", "DE": "Deere (Industrial)", "GE": "GE Aerospace (Industrial)",
+    "HON": "Honeywell (Industrial)", "UPS": "UPS (Industrial)", "FDX": "FedEx (Industrial)",
+    "BA": "Boeing (Industrial)", "RTX": "RTX (Industrial)", "LMT": "Lockheed Martin (Industrial)",
+    "NEE": "NextEra Energy (Utilities)", "DUK": "Duke Energy (Utilities)", "SO": "Southern Company (Utilities)",
+    "PLD": "Prologis (Real Estate)", "AMT": "American Tower (Real Estate)", "EQIX": "Equinix (Real Estate)",
+    "GLD": "SPDR Gold Trust (ETF)", "IWM": "Russell 2000 ETF", "VTI": "Total Stock Market ETF",
+    "EFA": "MSCI EAFE ETF", "EEM": "Emerging Markets ETF", "TLT": "20+ Year Treasury ETF",
+    "HYG": "High Yield Bond ETF", "LQD": "Investment Grade Bond ETF", "XLF": "Financial Select ETF",
+    "XLK": "Technology Select ETF", "XLV": "Health Care Select ETF", "XLE": "Energy Select ETF",
+})
+
+TICKER_PRESETS = {
+    "Base USTA": ["AAPL", "JPM", "JNJ", "XOM", "KO"],
+    "Databricks demo 15": ["AAPL", "MSFT", "NVDA", "GOOGL", "AMZN", "META", "JPM", "V", "LLY", "NVO", "XOM", "COST", "CAT", "NEE", "GLD"],
+    "Tecnología": ["AAPL", "MSFT", "NVDA", "GOOGL", "AMZN", "META", "AMD", "AVGO", "ORCL", "CRM"],
+    "Defensivo": ["JNJ", "KO", "PG", "WMT", "COST", "PEP", "MRK", "NEE", "DUK", "SO"],
+    "Financiero": ["JPM", "BAC", "GS", "V", "MA", "AXP", "MS", "C", "BLK", "SCHW"],
+    "Multi-sector 25": ["AAPL", "MSFT", "NVDA", "GOOGL", "AMZN", "JPM", "V", "MA", "JNJ", "LLY", "NVO", "XOM", "CVX", "KO", "PG", "COST", "WMT", "CAT", "DE", "NEE", "PLD", "GLD", "TLT", "XLK", "XLF"],
+}
+
 # ═══════════════════ SIDEBAR ═══════════════════
 
 with st.sidebar:
@@ -262,11 +295,19 @@ with st.sidebar:
         if t not in TICKERS_DB:
             TICKERS_DB[t] = f"{t} (Personalizado)"
 
+    with st.expander("⚡ Portafolios rápidos", expanded=False):
+        st.caption("Útiles para cargar más activos y aprovechar mejor Databricks.")
+        for nombre_preset, lista_preset in TICKER_PRESETS.items():
+            if st.button(nombre_preset, key=f"preset_{nombre_preset}", use_container_width=True):
+                st.session_state["tickers_seleccionados"] = lista_preset
+                st.rerun()
+
     tickers = st.multiselect(
-    "📦 Tickers del portafolio",
-    options=list(TICKERS_DB.keys()),
-    default=st.session_state["tickers_seleccionados"],
-    format_func=lambda t: f"{t} — {TICKERS_DB[t]}",
+        "📦 Tickers del portafolio",
+        options=sorted(TICKERS_DB.keys()),
+        default=[t for t in st.session_state["tickers_seleccionados"] if t in TICKERS_DB],
+        format_func=lambda t: f"{t} — {TICKERS_DB[t]}",
+        help="Puedes buscar por ticker dentro del selector o usar el buscador por nombre.",
     )
 
     # Sincronizar
@@ -326,18 +367,33 @@ with st.sidebar:
     }
 
     st.markdown("**🔍 Buscar empresa**")
-    empresa_busqueda = st.selectbox(
+    BUSCADOR_EMPRESAS = {
+        **{f"{ticker} — {nombre}": ticker for ticker, nombre in TICKERS_DB.items()},
+        **{f"{ticker} — {nombre}": ticker for nombre, ticker in EMPRESAS_BUSQUEDA.items()},
+    }
+    texto_busqueda = st.text_input(
         "Escribe nombre o ticker",
-        options=["— Buscar empresa —"] + sorted(EMPRESAS_BUSQUEDA.keys()),
+        placeholder="Ej: Nvidia, NVDA, bancos, energía...",
+        key="texto_busqueda_empresa",
+        help="Filtra por ticker, nombre o sector."
+    )
+    opciones_filtradas = [
+        etiqueta for etiqueta in sorted(BUSCADOR_EMPRESAS)
+        if not texto_busqueda.strip()
+        or texto_busqueda.lower() in etiqueta.lower()
+        or texto_busqueda.lower() in TICKERS_DB.get(BUSCADOR_EMPRESAS[etiqueta], "").lower()
+    ][:60]
+    empresa_busqueda = st.selectbox(
+        "Resultados",
+        options=["— Buscar empresa —"] + opciones_filtradas,
         key="buscador_empresa",
-        help="Escribe el nombre de la empresa y selecciónala"
     )
 
     if empresa_busqueda != "— Buscar empresa —":
-        ticker_encontrado = EMPRESAS_BUSQUEDA[empresa_busqueda]
+        ticker_encontrado = BUSCADOR_EMPRESAS[empresa_busqueda]
         col1, col2 = st.columns([2, 1])
         with col1:
-            st.success(f"**{ticker_encontrado}** — {empresa_busqueda}")
+            st.success(f"**{ticker_encontrado}** — {TICKERS_DB.get(ticker_encontrado, empresa_busqueda)}")
         with col2:
             if st.button("➕ Añadir", key="btn_add_empresa"):
                 if ticker_encontrado not in st.session_state["tickers_seleccionados"]:
@@ -484,8 +540,9 @@ with tabs[0]:
         **RiskLab USTA** es un sistema integral de análisis de riesgo financiero
         que integra:
         - **Backend:** FastAPI + SQLAlchemy + SQLite (persistencia y cache)
+        - **Cloud SQL:** Databricks SQL Warehouse con tabla `risklab_prices`
         - **Análisis:** Indicadores técnicos, VaR, CAPM, Markowitz, GARCH, EWMA
-        - **Nuevos módulos:** Renta fija (Nelson-Siegel), Opciones (Black-Scholes), Stress Testing, ML
+        - **Nuevos módulos:** Renta fija, Opciones, Stress Testing, ML y consultas cloud
         - **Infraestructura:** Docker, GitHub Actions CI, deploy en Render
         
         ### Arquitectura
@@ -493,9 +550,16 @@ with tabs[0]:
         Streamlit (8501) ──HTTP/JSON──► FastAPI (8000) ──► yfinance / FRED
                                           │
                                    SQLAlchemy + SQLite (cache)
+                                          │
+                                   Databricks SQL Warehouse
+                                   risklab_prices (capa cloud)
                                    Pydantic v2 (validación)
                                    9 servicios de cálculo
         ```
+
+        ### Databricks en el proyecto
+        Databricks no reemplaza SQLite: lo complementa como capa cloud para
+        consultar datos financieros con SQL sobre `risklab_prices`.
         """)
     with col2:
         st.markdown("### Activos Seleccionados")
@@ -2328,6 +2392,7 @@ with tabs[13]:
             "endpoint": "/analisis/var/AAPL",
             "accion": "SELECT + CÁLCULO",
             "recurso": "prices",
+            "almacen": "SQLite · `risklab.db`",
             "salida": "VaR / CVaR",
             "objetivo": "Leer datos persistidos, calcular riesgo y presentar métricas.",
             "nodos": ["Streamlit", "FastAPI", "RiskService", "SQLAlchemy SELECT", "SQLite", "Métricas"],
@@ -2348,47 +2413,99 @@ with tabs[13]:
             "json": '{"var_historico": -0.0214, "cvar": -0.0318, "nivel": 0.95}',
             "presentacion": "Tarjetas VaR/CVaR y análisis de exposición",
         },
+        "Consulta cloud Databricks": {
+            "color": "#ff5f46",
+            "metodo": "GET",
+            "endpoint": "/databricks/risklab-prices/resumen",
+            "accion": "SQL WAREHOUSE",
+            "recurso": "risklab_prices",
+            "almacen": "Databricks SQL Warehouse",
+            "salida": "Resumen cloud",
+            "objetivo": "Consultar en Databricks la tabla sincronizada desde SQLite.",
+            "nodos": ["Streamlit", "FastAPI", "DatabricksService", "SQL Warehouse", "risklab_prices", "Resumen"],
+            "etapas": [
+                ("Petición", "Streamlit solicita el resumen cloud expuesto por FastAPI."),
+                ("Credenciales", "El backend lee hostname, HTTP path y token desde `backend/.env`."),
+                ("Warehouse", "Databricks SQL ejecuta la consulta sobre `risklab_prices`."),
+                ("Agregación", "La tabla devuelve registros, fechas y precios promedio por ticker."),
+                ("Presentación", "El dashboard puede mostrar la evidencia de integración cloud."),
+            ],
+            "request": 'requests.get(f"{API}/databricks/risklab-prices/resumen")',
+            "orm": (
+                "with sql.connect(server_hostname=host, http_path=http_path, access_token=token) as conn:\n"
+                "    cursor.execute('''\n"
+                "        SELECT ticker, COUNT(*) AS registros, AVG(close) AS precio_promedio\n"
+                "        FROM risklab_prices GROUP BY ticker\n"
+                "    ''')"
+            ),
+            "json": '{"tabla": "risklab_prices", "datos": [{"ticker": "AAPL", "registros": 751}]}',
+            "presentacion": "Tabla resumen consultada desde Databricks",
+        },
     }
 
-    st.markdown("#### Elige el caso que quieres explicar")
-    recorrido = st.radio(
-        "Recorrido técnico",
-        list(recorridos.keys()),
-        horizontal=True,
-        key="arquitectura_recorrido",
-        label_visibility="collapsed",
-    )
+    if "arquitectura_recorrido" not in st.session_state:
+        st.session_state["arquitectura_recorrido"] = "Lectura de precios"
+    recorrido = st.session_state["arquitectura_recorrido"]
     escenario = recorridos[recorrido]
-
-    st.markdown(
-        f"""
-        <div style="border-left:6px solid {escenario['color']}; background:#ffffff;
-                    padding:14px 18px; border-radius:10px; margin:8px 0 18px 0;">
-          <div style="font-size:12px; font-weight:700; color:{escenario['color']};">
-            RECORRIDO ACTIVO · {escenario['metodo']} {escenario['endpoint']}
-          </div>
-          <div style="font-size:16px; font-weight:600; margin-top:5px;">{recorrido}</div>
-          <div style="font-size:13px; color:#475569; margin-top:5px;">{escenario['objetivo']}</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Petición HTTP", escenario["metodo"])
-    c1.caption(escenario["endpoint"])
-    c2.metric("Operación ORM", escenario["accion"])
-    c2.caption("SQLAlchemy 2.0")
-    c3.metric("Tabla / recurso", escenario["recurso"])
-    c3.caption("SQLite · `risklab.db`")
-    c4.metric("Resultado final", escenario["salida"])
-    c4.caption(escenario["presentacion"])
 
     flujo_tab, sql_tab, infraestructura_tab = st.tabs(
         ["🔄 Flujo de llamados", "🗃️ SQL y consultas", "🐳 Infraestructura"]
     )
 
     with flujo_tab:
+        st.markdown("#### Elige el caso que quieres explicar")
+        botones = st.columns(len(recorridos))
+        for idx, (nombre_recorrido, datos_recorrido) in enumerate(recorridos.items()):
+            activo = nombre_recorrido == recorrido
+            with botones[idx]:
+                st.markdown(
+                    f"""
+                    <div style="height:74px; border:2px solid {'{0}'.format(datos_recorrido['color']) if activo else '#dbe3ef'};
+                                background:{'rgba(26,86,219,0.08)' if activo else '#ffffff'};
+                                border-radius:14px; padding:10px; margin-bottom:6px;">
+                        <div style="font-size:12px; font-weight:700; color:{datos_recorrido['color']};">
+                            {datos_recorrido['metodo']}
+                        </div>
+                        <div style="font-size:13px; font-weight:700; color:#1e293b; line-height:1.15;">
+                            {'✓ ' if activo else ''}{nombre_recorrido}
+                        </div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+                if st.button(
+                    "Seleccionado" if activo else "Seleccionar",
+                    key=f"btn_recorrido_{nombre_recorrido}",
+                    type="primary" if activo else "secondary",
+                    use_container_width=True,
+                ):
+                    st.session_state["arquitectura_recorrido"] = nombre_recorrido
+                    st.rerun()
+
+        st.markdown(
+            f"""
+            <div style="border-left:6px solid {escenario['color']}; background:#ffffff;
+                        padding:14px 18px; border-radius:10px; margin:18px 0;">
+              <div style="font-size:12px; font-weight:700; color:{escenario['color']};">
+                RECORRIDO ACTIVO · {escenario['metodo']} {escenario['endpoint']}
+              </div>
+              <div style="font-size:16px; font-weight:600; margin-top:5px;">{recorrido}</div>
+              <div style="font-size:13px; color:#475569; margin-top:5px;">{escenario['objetivo']}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Petición HTTP", escenario["metodo"])
+        c1.caption(escenario["endpoint"])
+        c2.metric("Operación ORM", escenario["accion"])
+        c2.caption("SQLAlchemy 2.0")
+        c3.metric("Tabla / recurso", escenario["recurso"])
+        c3.caption(escenario.get("almacen", "SQLite · `risklab.db`"))
+        c4.metric("Resultado final", escenario["salida"])
+        c4.caption(escenario["presentacion"])
+
         st.markdown(f"### Ruta activa: {recorrido}")
         nodos = escenario["nodos"]
         x_pos = list(range(len(nodos)))
@@ -2476,6 +2593,7 @@ with tabs[13]:
                     {"Tabla": "portfolios", "Rol": "Asignación y pesos", "Interviene": False},
                     {"Tabla": "prediction_logs", "Rol": "Salida de ML", "Interviene": False},
                     {"Tabla": "signals_log", "Rol": "Alertas técnicas", "Interviene": False},
+                    {"Tabla": "risklab_prices", "Rol": "Tabla cloud en Databricks", "Interviene": recorrido == "Consulta cloud Databricks"},
                 ]
             )
             tablas["Interviene"] = tablas["Interviene"].map({True: "Sí", False: "No"})
@@ -2496,7 +2614,7 @@ with tabs[13]:
                 )
 
         st.success(
-            f"En este recorrido, SQLite actúa como **{('cache persistente' if recorrido == 'Persistencia desde Yahoo' else 'fuente local de datos')}** "
+            f"En este recorrido, {'Databricks SQL actúa como **capa cloud de consulta**' if recorrido == 'Consulta cloud Databricks' else 'SQLite actúa como **' + ('cache persistente' if recorrido == 'Persistencia desde Yahoo' else 'fuente local de datos') + '**'} "
             f"y la interfaz termina mostrando: **{escenario['presentacion']}**."
         )
 
@@ -2523,22 +2641,119 @@ with tabs[13]:
         with col_bricks:
             with st.container(border=True):
                 st.markdown("### 🧱 Bricks / Databricks")
-                st.warning("No está implementado en este repositorio.")
+                st.success("Integración cloud opcional configurada.")
                 st.markdown(
-                    "No se encontraron imports, configuración, conectores ni "
-                    "jobs de **Databricks**. La persistencia actual es local con "
-                    "**SQLite**; Databricks aplicaría solo si se migrara a un "
-                    "pipeline distribuido o a almacenamiento analítico cloud."
+                    "El backend puede conectarse a **Databricks SQL Warehouse** "
+                    "usando `DATABRICKS_SERVER_HOSTNAME`, `DATABRICKS_HTTP_PATH` "
+                    "y `DATABRICKS_TOKEN`. La tabla demo es **risklab_prices**, "
+                    "cargada desde los precios de SQLite."
                 )
+                st.code(
+                    "FastAPI --> Databricks SQL Warehouse --> risklab_prices\n"
+                    "Endpoint: GET /databricks/risklab-prices/resumen",
+                    language="text",
+                )
+
+        st.divider()
+        st.markdown("### 🔎 Laboratorio SQL en Databricks")
+        st.caption(
+            "Selecciona una consulta predefinida. FastAPI la ejecuta en Databricks SQL Warehouse "
+            "sobre la tabla `risklab_prices` y devuelve el resultado al dashboard."
+        )
+
+        consultas_data = api_get("/databricks/consultas", timeout=60)
+        consultas = consultas_data.get("consultas", []) if consultas_data else []
+        if not consultas:
+            st.info(
+                "Modo demostración: el backend desplegado todavía no expone las consultas de Databricks "
+                "o no tiene credenciales cloud configuradas. La integración queda documentada y lista para "
+                "activarse cuando el deploy incluya las variables `DATABRICKS_*`."
+            )
+            consultas = [
+                {
+                    "id": "promedio_cierre",
+                    "titulo": "Promedio de cierre por activo",
+                    "descripcion": "Promedio, mínimo y máximo del precio de cierre por ticker.",
+                    "sql": "SELECT ticker, COUNT(*) AS registros, ROUND(AVG(close), 2) AS cierre_promedio, ROUND(MIN(close), 2) AS cierre_minimo, ROUND(MAX(close), 2) AS cierre_maximo FROM risklab_prices GROUP BY ticker ORDER BY cierre_promedio DESC",
+                    "demo": True,
+                },
+                {
+                    "id": "top_5_ultimo_cierre",
+                    "titulo": "Top 5 por último cierre",
+                    "descripcion": "Activos con mayor precio en la fecha más reciente disponible.",
+                    "sql": "WITH ultimos AS (SELECT ticker, MAX(fecha) AS fecha FROM risklab_prices GROUP BY ticker) SELECT p.ticker, p.fecha, ROUND(p.close, 2) AS ultimo_cierre FROM risklab_prices p INNER JOIN ultimos u ON p.ticker = u.ticker AND p.fecha = u.fecha ORDER BY ultimo_cierre DESC LIMIT 5",
+                    "demo": True,
+                },
+                {
+                    "id": "menor_fluctuacion_mes",
+                    "titulo": "Menor fluctuación en el último mes",
+                    "descripcion": "Activos con menor rango porcentual aproximado en los últimos 30 días.",
+                    "sql": "SELECT ticker, ROUND((MAX(close) - MIN(close)) / AVG(close) * 100, 2) AS fluctuacion_pct FROM risklab_prices WHERE fecha >= DATE_SUB((SELECT MAX(fecha) FROM risklab_prices), 30) GROUP BY ticker ORDER BY fluctuacion_pct ASC LIMIT 5",
+                    "demo": True,
+                },
+            ]
+            st.caption("Estas consultas se muestran como ejemplo de presentación; no ejecutan el warehouse en modo demo.")
+
+        consulta_map = {c["titulo"]: c for c in consultas}
+        consulta_titulo = st.selectbox(
+            "Consulta SQL preseleccionada",
+            options=list(consulta_map.keys()),
+            key="consulta_databricks_sql",
+        )
+        consulta_sel = consulta_map[consulta_titulo]
+
+        sql_col, resultado_col = st.columns([1, 1.25])
+        with sql_col:
+            st.markdown(f"**{consulta_sel['titulo']}**")
+            st.caption(consulta_sel["descripcion"])
+            st.code(consulta_sel["sql"], language="sql")
+
+        with resultado_col:
+            if consulta_sel.get("demo"):
+                st.warning("Consulta no ejecutada: backend desplegado sin endpoint/credenciales Databricks.")
+                st.markdown(
+                    """
+                    **Qué demuestra esta consulta**
+                    - La tabla cloud esperada es `risklab_prices`.
+                    - El cálculo se haría directamente en Databricks SQL Warehouse.
+                    - Al configurar las variables `DATABRICKS_*` en el backend desplegado, aquí aparecerá la tabla real.
+                    """
+                )
+            else:
+                if st.button("▶ Ejecutar consulta en Databricks", key="btn_run_databricks_sql", type="primary"):
+                    st.session_state["resultado_databricks_sql"] = api_get(
+                        f"/databricks/consultas/{consulta_sel['id']}",
+                        timeout=120,
+                    )
+
+                resultado_sql = st.session_state.get("resultado_databricks_sql")
+                if resultado_sql and resultado_sql.get("id") == consulta_sel["id"]:
+                    df_sql = pd.DataFrame(resultado_sql.get("resultados", []))
+                    if df_sql.empty:
+                        st.info("La consulta no devolvió filas.")
+                    else:
+                        numeric_cols = [
+                            col for col in df_sql.columns
+                            if pd.api.types.is_numeric_dtype(pd.to_numeric(df_sql[col], errors="coerce"))
+                        ]
+                        metric_cols = st.columns(min(3, max(1, len(numeric_cols))))
+                        if numeric_cols:
+                            for i, col in enumerate(numeric_cols[:3]):
+                                valor = pd.to_numeric(df_sql[col], errors="coerce").dropna()
+                                if not valor.empty:
+                                    metric_cols[i].metric(col.replace("_", " ").title(), f"{valor.iloc[0]:,.2f}")
+                        st.dataframe(df_sql, use_container_width=True, hide_index=True)
+                else:
+                    st.info("Ejecuta la consulta para ver evidencia numérica desde Databricks.")
 
         with st.expander("📌 Guion rápido para la presentación", expanded=True):
             st.markdown(
                 f"**Caso seleccionado: {recorrido}.**\n\n"
                 f"1. Streamlit dispara `{escenario['metodo']} {escenario['endpoint']}`.\n"
                 f"2. FastAPI entrega una sesión SQLAlchemy y ejecuta **{escenario['accion']}**.\n"
-                f"3. SQLite participa sobre **{escenario['recurso']}** en `risklab.db`.\n"
+                f"3. La capa de datos participa sobre **{escenario['recurso']}** en {escenario.get('almacen', 'SQLite')}.\n"
                 f"4. La API devuelve **{escenario['salida']}** y el dashboard muestra **{escenario['presentacion']}**.\n"
-                "5. Docker empaqueta frontend y backend; **Databricks no forma parte** de la solución actual."
+                "5. Docker empaqueta frontend y backend; Databricks queda como capa cloud opcional para consultas SQL."
             )
 
 
