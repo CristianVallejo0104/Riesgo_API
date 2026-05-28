@@ -1,33 +1,33 @@
 {
-  "mejor_modelo": "XGBoost",
-  "accuracy": 0.5329,
-  "fecha_entrenamiento": "2026-05-27T21:47:03.998025",
+  "mejor_modelo": "Random Forest",
+  "accuracy": 0.5263,
+  "fecha_entrenamiento": "2026-05-27T21:56:57.319554",
   "comparacion": {
     "Random Forest": {
-      "accuracy": 0.5197,
-      "precision": 0.5333,
-      "recall": 0.7901,
+      "accuracy": 0.5263,
+      "precision": 0.5275,
+      "recall": 0.6234,
       "mejores_params": {
-        "max_depth": 3,
-        "n_estimators": 100
-      }
-    },
-    "XGBoost": {
-      "accuracy": 0.5329,
-      "precision": 0.5532,
-      "recall": 0.642,
-      "mejores_params": {
-        "learning_rate": 0.2,
-        "max_depth": 3,
+        "max_depth": 5,
         "n_estimators": 50
       }
     },
+    "XGBoost": {
+      "accuracy": 0.4539,
+      "precision": 0.4674,
+      "recall": 0.5584,
+      "mejores_params": {
+        "learning_rate": 0.2,
+        "max_depth": 5,
+        "n_estimators": 200
+      }
+    },
     "Logistic Regression": {
-      "accuracy": 0.5329,
-      "precision": 0.5329,
+      "accuracy": 0.5066,
+      "precision": 0.5066,
       "recall": 1.0,
       "mejores_params": {
-        "C": 10.0
+        "C": 0.1
       }
     }
   },

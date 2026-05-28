@@ -2057,52 +2057,23 @@ with tabs[11]:
 
 with tabs[12]:
     st.subheader("🤖 Inteligencia Artificial — Predicción de Tendencia")
-
-    # ── Estado del modelo ──
-    estado_ml = api_get("/ml/estado")
-    if estado_ml and estado_ml.get("modelo_entrenado"):
-        col_e1, col_e2, col_e3, col_e4 = st.columns(4)
-        col_e1.metric("🏆 Mejor Modelo", estado_ml.get("mejor_modelo", "—"))
-        col_e2.metric("🎯 Accuracy", f"{estado_ml.get('accuracy', 0):.2%}")
-        fecha_ent = estado_ml.get("fecha_entrenamiento", "—")
-        if fecha_ent != "—":
-            from datetime import datetime
-            fecha_fmt = datetime.fromisoformat(fecha_ent).strftime("%d/%m/%Y %H:%M")
-        else:
-            fecha_fmt = "—"
-        col_e3.metric("📅 Último Entrenamiento", fecha_fmt)
-        necesita = estado_ml.get("necesita_reentrenamiento", False)
-        col_e4.metric("🔄 Reentrenamiento", "⚠️ Necesario" if necesita else "✅ Vigente")
-
-        # Tabla comparativa de modelos
-        if estado_ml.get("comparacion_modelos"):
-            st.markdown("### 📊 Comparación de Modelos")
-            comp = estado_ml["comparacion_modelos"]
-            rows = []
-            for nombre, metricas in comp.items():
-                es_mejor = nombre == estado_ml.get("mejor_modelo")
-                rows.append({
-                    "Modelo": f"⭐ {nombre}" if es_mejor else nombre,
-                    "Accuracy": f"{metricas['accuracy']:.2%}",
-                    "Precisión": f"{metricas['precision']:.2%}",
-                    "Recall": f"{metricas['recall']:.2%}",
-                    "Estado": "✅ SELECCIONADO" if es_mejor else "—",
-                })
-            df_comp = pd.DataFrame(rows).set_index("Modelo")
-            st.dataframe(df_comp, use_container_width=True)
-    else:
-        st.info("⏳ No hay modelo entrenado. Entrena uno primero.", icon="🧠")
-
+    st.markdown("""
+    El módulo de ML entrena y compara automáticamente **3 modelos de clasificación** 
+    (Random Forest, XGBoost y Logistic Regression) para predecir si el precio de un 
+    activo **subirá o bajará** al día siguiente.
+    El sistema usa los **retornos logarítmicos de los últimos 5 días** como features 
+    y selecciona automáticamente el modelo con mejor accuracy. Los hiperparámetros se 
+    optimizan con **GridSearchCV** y el modelo se reentrenan automáticamente **cada 8 días**.
+    """)
     st.divider()
 
+    # ── SECCIÓN 1: CONTROLES ──
     with st.container(border=True):
         col1, col2 = st.columns([1, 1])
 
         with col1:
             st.markdown("### 🏋️ Entrenamiento")
-
             ticker_ml = st.selectbox("Activo a entrenar", tickers, key="ml_t")
-
             col_opt1, col_opt2 = st.columns(2)
             with col_opt1:
                 optimizar_hp = st.checkbox("⚙️ Optimizar hiperparámetros", value=True,
@@ -2117,56 +2088,45 @@ with tabs[12]:
                     d = api_post(f"/ml/entrenar/{ticker_ml}{params}")
                 if d:
                     if d.get("mensaje") == "Modelo vigente":
-                        st.info(f"ℹ️ Modelo vigente — entrenado hace {d.get('dias_desde_entrenamiento', 0)} días. Activa 'Forzar reentrenamiento' para actualizar.")
+                        st.session_state["ml_aviso"] = f"ℹ️ Modelo vigente — entrenado hace {d.get('dias_desde_entrenamiento', 0)} días. Activa 'Forzar reentrenamiento' para actualizar."
                     else:
                         st.session_state[f"ml_trained_{ticker_ml}"] = d
-                        st.success(f"✅ Mejor modelo: **{d.get('mejor_modelo')}** — Accuracy: {d.get('accuracy', 0):.2%}")
-                        if d.get("comparacion"):
-                            rows = []
-                            for nombre, metricas in d["comparacion"].items():
-                                es_mejor = nombre == d.get("mejor_modelo")
-                                rows.append({
-                                    "Modelo": f"⭐ {nombre}" if es_mejor else nombre,
-                                    "Accuracy": f"{metricas['accuracy']:.2%}",
-                                    "Precisión": f"{metricas['precision']:.2%}",
-                                    "Recall": f"{metricas['recall']:.2%}",
-                                })
-                            st.dataframe(pd.DataFrame(rows).set_index("Modelo"), use_container_width=True)
-                        st.rerun()
+                        st.session_state["ml_ultimo_resultado"] = d
+                        st.session_state["ml_aviso"] = None
+                    st.rerun()
 
             st.divider()
 
             if st.button("🚀 Entrenar TODOS los activos", key="btn_ml_all",
-                         use_container_width=True, type="primary"):
-                with st.spinner("Entrenando y comparando modelos con todos los activos..."):
-                    params = f"?optimizar={str(optimizar_hp).lower()}&forzar={str(forzar_ent).lower()}"
-                    d = api_post(f"/ml/entrenar-todos{params}")
-                if d:
-                    if d.get("mensaje") == "Modelo vigente":
-                        st.info("ℹ️ Modelo vigente. Activa 'Forzar reentrenamiento' para actualizar.")
-                    else:
-                        st.success(f"✅ Mejor modelo: **{d.get('mejor_modelo')}** — Accuracy: {d.get('accuracy', 0):.2%}")
-                        for t in tickers:
-                            d_pred = api_post(f"/ml/predecir/{t}")
-                            if d_pred:
-                                st.session_state[f"ml_pred_{t}"] = d_pred
-                        st.rerun()
-
-            modelos_entrenados = [t for t in tickers if f"ml_trained_{t}" in st.session_state]
-            if modelos_entrenados:
-                st.markdown("#### 🎯 Accuracy por Activo")
-                for t in modelos_entrenados:
-                    acc = st.session_state[f"ml_trained_{t}"].get("accuracy", 0)
-                    mejor = st.session_state[f"ml_trained_{t}"].get("mejor_modelo", "—")
-                    color = "🟢" if acc >= 0.6 else "🟡" if acc >= 0.5 else "🔴"
-                    st.write(f"{color} **{t}:** {acc:.2%} — {mejor}")
+                        use_container_width=True, type="primary"):
+                progreso = st.progress(0, text="Iniciando entrenamiento...")
+                params = f"?optimizar={str(optimizar_hp).lower()}&forzar={str(forzar_ent).lower()}"
+                ultimo_resultado = None
+                for i, t in enumerate(tickers):
+                    progreso.progress((i + 0.5) / len(tickers), text=f"Entrenando {t}...")
+                    d = api_post(f"/ml/entrenar/{t}{params}")
+                    if d and d.get("mensaje") != "Modelo vigente":
+                        st.session_state[f"ml_trained_{t}"] = d
+                        ultimo_resultado = d
+                    progreso.progress((i + 1) / len(tickers), text=f"Prediciendo {t}...")
+                    d_pred = api_post(f"/ml/predecir/{t}")
+                    if d_pred:
+                        st.session_state[f"ml_pred_{t}"] = d_pred
+                progreso.empty()
+                if ultimo_resultado:
+                    st.session_state["ml_ultimo_resultado"] = ultimo_resultado
+                    st.session_state["ml_aviso"] = None
+                else:
+                    st.session_state["ml_aviso"] = "ℹ️ Modelos vigentes. Activa 'Forzar reentrenamiento' para actualizar."
+                st.rerun()
 
         with col2:
             st.markdown("### 🔮 Predicción")
             ticker_p = st.selectbox("Activo a predecir", tickers, key="ml_p")
 
-            if f"ml_trained_{ticker_p}" not in st.session_state and not (estado_ml and estado_ml.get("modelo_entrenado")):
-                st.warning(f"⚠️ Entrena el modelo primero.")
+            estado_ml = api_get("/ml/estado")
+            if not (estado_ml and estado_ml.get("modelo_entrenado")):
+                st.warning("⚠️ Entrena el modelo primero.")
 
             if st.button("Ejecutar Predicción", key="btn_ml_p", use_container_width=True):
                 with st.spinner(f"Prediciendo {ticker_p}..."):
@@ -2196,10 +2156,8 @@ with tabs[12]:
                             {'range': [40, 60], 'color': "rgba(245,158,11,0.2)"},
                             {'range': [60, 100], 'color': "rgba(16,185,129,0.2)"},
                         ],
-                        'threshold': {
-                            'line': {'color': "white", 'width': 3},
-                            'thickness': 0.75, 'value': 50
-                        }
+                        'threshold': {'line': {'color': "white", 'width': 3},
+                                      'thickness': 0.75, 'value': 50}
                     }
                 ))
                 fig_gauge.update_layout(height=280, margin=dict(l=20, r=20, t=60, b=20))
@@ -2212,12 +2170,64 @@ with tabs[12]:
                 except: pass
 
                 confianza = "ALTA" if prob > 0.7 else "MEDIA" if prob > 0.55 else "BAJA"
+                mejor_mod = estado_ml.get('mejor_modelo', 'XGBoost') if estado_ml else 'XGBoost'
                 st.markdown(f"""
-                **Precio actual {ticker_p}:** USD {precio_act:,.2f}
-                **Señal:** {emoji} {label} con confianza **{confianza}** ({prob:.1%})
-                **Modelo usado:** {estado_ml.get('mejor_modelo', 'Random Forest') if estado_ml else 'Random Forest'}
+                **Precio actual {ticker_p}:** USD {precio_act:,.2f}  
+                **Señal:** {emoji} {label} con confianza **{confianza}** ({prob:.1%})  
+                **Modelo usado:** {mejor_mod}
                 """)
 
+    # ── SECCIÓN 2: RESULTADOS DEL ENTRENAMIENTO ──
+    st.divider()
+
+    # Aviso de modelo vigente
+    if st.session_state.get("ml_aviso"):
+        st.info(st.session_state["ml_aviso"])
+
+    # Estado del modelo
+    if estado_ml and estado_ml.get("modelo_entrenado"):
+        st.markdown("### 📊 Estado del Modelo")
+        col_e1, col_e2, col_e3, col_e4 = st.columns(4)
+        col_e1.metric("🏆 Mejor Modelo", estado_ml.get("mejor_modelo", "—"))
+        col_e2.metric("🎯 Accuracy", f"{estado_ml.get('accuracy', 0):.2%}")
+        fecha_ent = estado_ml.get("fecha_entrenamiento", "—")
+        if fecha_ent != "—":
+            from datetime import datetime
+            fecha_fmt = datetime.fromisoformat(fecha_ent).strftime("%d/%m/%Y %H:%M")
+        else:
+            fecha_fmt = "—"
+        col_e3.metric("📅 Último Entrenamiento", fecha_fmt)
+        necesita = estado_ml.get("necesita_reentrenamiento", False)
+        col_e4.metric("🔄 Reentrenamiento", "⚠️ Necesario" if necesita else "✅ Vigente")
+    else:
+        st.info("⏳ No hay modelo entrenado. Entrena uno primero.", icon="🧠")
+
+    # Tabla comparativa
+    ultimo = st.session_state.get("ml_ultimo_resultado")
+    comp_data = None
+    if ultimo and ultimo.get("comparacion"):
+        comp_data = ultimo["comparacion"]
+        mejor_nombre = ultimo.get("mejor_modelo")
+        st.success(f"✅ Último entrenamiento — Mejor modelo: **{mejor_nombre}** — Accuracy: {ultimo.get('accuracy', 0):.2%}")
+    elif estado_ml and estado_ml.get("comparacion_modelos"):
+        comp_data = estado_ml["comparacion_modelos"]
+        mejor_nombre = estado_ml.get("mejor_modelo")
+
+    if comp_data:
+        st.markdown("### 🥇 Comparación de Modelos")
+        rows = []
+        for nombre, metricas in comp_data.items():
+            es_mejor = nombre == mejor_nombre
+            rows.append({
+                "Modelo": f"⭐ {nombre}" if es_mejor else nombre,
+                "Accuracy": f"{metricas['accuracy']:.2%}",
+                "Precisión": f"{metricas['precision']:.2%}",
+                "Recall": f"{metricas['recall']:.2%}",
+                "Estado": "✅ SELECCIONADO" if es_mejor else "—",
+            })
+        st.dataframe(pd.DataFrame(rows).set_index("Modelo"), use_container_width=True)
+
+    # ── SECCIÓN 3: RESUMEN DE SEÑALES ──
     preds_guardadas = {t: st.session_state[f"ml_pred_{t}"]
                        for t in tickers if f"ml_pred_{t}" in st.session_state}
     if preds_guardadas:
@@ -2246,10 +2256,7 @@ with tabs[12]:
         else:
             st.warning(f"⚖️ **Portafolio neutral** — señales mixtas.")
 
-        st.info("""
-        ⚠️ **Importante:** predicciones basadas en ML con datos históricos.
-        No constituyen asesoramiento financiero.
-        """)
+        st.info("⚠️ **Importante:** predicciones basadas en ML con datos históricos. No constituyen asesoramiento financiero.")
 
 
 # ═══════════════════ AGENTE IA ═══════════════════
