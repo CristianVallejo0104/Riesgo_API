@@ -1285,7 +1285,8 @@ with tabs[6]:
                 if p_data and isinstance(p_data, list) and len(p_data) > 0:
                     df_p = pd.DataFrame(p_data)
                     df_p["fecha"] = pd.to_datetime(df_p["fecha"])
-                    precios_dict[t] = df_p.set_index("fecha")["close"]
+                    serie = df_p.set_index("fecha")["close"]
+                    precios_dict[t] = serie[~serie.index.duplicated(keep='last')]
 
             if data_m:
                 st.session_state[cache_key_m6] = {
@@ -1326,6 +1327,7 @@ with tabs[6]:
 
         with st.spinner(f"Simulando {n_port:,} portafolios..."):
             df_precios = pd.DataFrame(precios_dict)
+            df_precios = df_precios[~df_precios.index.duplicated(keep='last')]
             df_ret = np.log(df_precios / df_precios.shift(1)).dropna()
             mean_returns = df_ret.mean() * 252
             cov_matrix = df_ret.cov() * 252
