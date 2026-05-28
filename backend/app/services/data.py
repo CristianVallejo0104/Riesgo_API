@@ -19,24 +19,34 @@ class DataService:
         self.db = db
 
     def registrar_activo(self, ticker: str) -> Asset:
-        existente= self.db.scalars(
+        existente = self.db.scalars(
             select(Asset).where(Asset.ticker == ticker)
         ).first()
         if existente:
             return existente
         
-        info = yf.Ticker(ticker).info
-        activo= Asset(
-            ticker=ticker,
-            nombre=info.get("longName", ticker),
-            sector=info.get("sector", "Desconocido"),
-            moneda=info.get("currency", "USD")
-        )
-        self.db.add(activo)
-        self.db.commit()
-        self.db.refresh(activo)
-        logger.info(f"Activo {ticker} registrado desde yfinance")
-        return activo
+        try:
+            info = yf.Ticker(ticker).info
+            activo = Asset(
+                ticker=ticker,
+                nombre=info.get("longName", ticker),
+                sector=info.get("sector", "Desconocido"),
+                moneda=info.get("currency", "USD")
+            )
+            self.db.add(activo)
+            self.db.commit()
+            self.db.refresh(activo)
+            logger.info(f"Activo {ticker} registrado desde yfinance")
+            return activo
+        except Exception:
+            self.db.rollback()
+            # Si falló por duplicado, buscarlo de nuevo
+            existente = self.db.scalars(
+                select(Asset).where(Asset.ticker == ticker)
+            ).first()
+            if existente:
+                return existente
+            raise
     
     def descargar_precios(self, ticker: str, years: int = None) -> list[Price]:
         if years is None:
