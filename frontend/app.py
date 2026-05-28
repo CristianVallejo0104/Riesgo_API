@@ -2724,8 +2724,15 @@ with tabs[13]:
                     "cargada desde los precios de SQLite."
                 )
                 st.code(
-                    "FastAPI --> Databricks SQL Warehouse --> risklab_prices\n"
-                    "Endpoint: GET /databricks/risklab-prices/resumen",
+                    "Flujo actual:\n"
+                    "yfinance → FastAPI → SQLite → SQLAlchemy → modelos\n\n"
+                    "Flujo complementario:\n"
+                    "Databricks → FastAPI → consultas SQL → dashboard\n\n"
+                    "FastAPI intenta yfinance\n"
+                    "  ↓ si falla\n"
+                    "FastAPI consulta Databricks risklab_prices\n"
+                    "  ↓\n"
+                    "continúa el análisis",
                     language="text",
                 )
 
