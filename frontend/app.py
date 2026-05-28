@@ -14,15 +14,44 @@ import os
 
 def plotly_layout(title, height=350, xaxis_title="", yaxis_title=""):
     return {
-        "title": {"text": f"<b>{title}</b>", "font": {"size": 16, "color": "#1e293b"}, "x": 0},
-        "paper_bgcolor": "rgba(0,0,0,0)",
-        "plot_bgcolor": "rgba(0,0,0,0)",
+        "title": {"text": f"<b>{title}</b>", "font": {"size": 15, "color": "#0f172a", "family": "Montserrat, sans-serif"}, "x": 0},
+        "paper_bgcolor": "white",
+        "plot_bgcolor": "#fafafa",
         "height": height,
-        "margin": dict(l=40, r=20, t=60, b=40),
-        "xaxis": {"title": xaxis_title, "gridcolor": "#e2e8f0", "showgrid": True},
-        "yaxis": {"title": yaxis_title, "gridcolor": "#e2e8f0", "showgrid": True},
-        "legend": {"orientation": "h", "yanchor": "bottom", "y": 1.02, "xanchor": "right", "x": 1},
-        "font": {"family": "Montserrat, sans-serif", "color": "#1e293b"}
+        "margin": dict(l=50, r=20, t=60, b=50),
+        "xaxis": {
+            "title": xaxis_title,
+            "gridcolor": "#f1f5f9",
+            "showgrid": True,
+            "linecolor": "#e2e8f0",
+            "tickfont": {"size": 11, "color": "#64748b"},
+            "titlefont": {"size": 12, "color": "#475569"},
+        },
+        "yaxis": {
+            "title": yaxis_title,
+            "gridcolor": "#f1f5f9",
+            "showgrid": True,
+            "linecolor": "#e2e8f0",
+            "tickfont": {"size": 11, "color": "#64748b"},
+            "titlefont": {"size": 12, "color": "#475569"},
+        },
+        "legend": {
+            "orientation": "h",
+            "yanchor": "bottom",
+            "y": 1.02,
+            "xanchor": "right",
+            "x": 1,
+            "font": {"size": 11, "color": "#475569"},
+            "bgcolor": "rgba(255,255,255,0.8)",
+            "bordercolor": "#e2e8f0",
+            "borderwidth": 1,
+        },
+        "font": {"family": "Montserrat, sans-serif", "color": "#0f172a"},
+        "hoverlabel": {
+            "bgcolor": "white",
+            "bordercolor": "#e2e8f0",
+            "font": {"size": 12, "color": "#0f172a"},
+        },
     }
 
 st.set_page_config(page_title="RiskLab USTA", page_icon="📊", layout="wide", initial_sidebar_state="expanded")
@@ -30,26 +59,107 @@ st.set_page_config(page_title="RiskLab USTA", page_icon="📊", layout="wide", i
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700&display=swap');
+    
     html, body, [class*="css"] { font-family: 'Montserrat', sans-serif; }
+
+    /* Ocultar marca Streamlit */
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    header {visibility: hidden;}
+
+    /* Header principal — igual que antes */
     .main-header {
         background: linear-gradient(135deg, #1a56db 0%, #1e40af 100%);
-        padding: 1.5rem 2rem; border-radius: 12px; margin-bottom: 1.5rem;
+        padding: 1.5rem 2rem; 
+        border-radius: 12px; 
+        margin-bottom: 1.5rem;
+        box-shadow: 0 4px 20px rgba(26, 86, 219, 0.25);
     }
     .main-header h1 { margin: 0; font-size: 1.8rem; font-weight: 700; color: white; }
     .main-header p  { margin: 0.3rem 0 0; color: #e2e8f0; font-size: 0.9rem; }
+    .main-header strong { color: white !important; }
+
+    /* Tabs mejorados */
     .stTabs [data-baseweb="tab-list"] { 
         gap: 2px; 
         overflow-x: auto !important; 
         flex-wrap: nowrap !important;
         scrollbar-width: thin;
+        background: #f1f5f9;
+        padding: 3px;
+        border-radius: 8px;
+        border: 1px solid #e2e8f0;
+    }
+    .stTabs [data-baseweb="tab-list"]::-webkit-scrollbar { height: 4px; }
+    .stTabs [data-baseweb="tab-list"]::-webkit-scrollbar-thumb {
+        background: #cbd5e1;
+        border-radius: 3px;
     }
     .stTabs [data-baseweb="tab"] { 
-        border-radius: 8px 8px 0 0; 
+        border-radius: 6px; 
         padding: 6px 10px; 
         font-weight: 600; 
         font-size: 0.75rem;
         white-space: nowrap;
+        color: #64748b;
     }
+    .stTabs [aria-selected="true"] {
+        background: white !important;
+        color: #1d4ed8 !important;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.08) !important;
+    }
+
+    /* Métricas con card */
+    [data-testid="stMetric"] {
+        background: white !important;
+        border: 1px solid #e2e8f0 !important;
+        border-radius: 10px !important;
+        padding: 1rem !important;
+        box-shadow: 0 1px 4px rgba(0,0,0,0.05) !important;
+    }
+    [data-testid="stMetricLabel"] {
+        font-size: 0.72rem !important;
+        font-weight: 700 !important;
+        color: #64748b !important;
+        text-transform: uppercase !important;
+        letter-spacing: 0.05em !important;
+    }
+    [data-testid="stMetricValue"] {
+        font-size: 1.5rem !important;
+        font-weight: 700 !important;
+        color: #0f172a !important;
+    }
+
+    /* Botones azules */
+    .stButton > button {
+        background: linear-gradient(135deg, #1d4ed8, #2563eb) !important;
+        color: white !important;
+        border: none !important;
+        border-radius: 8px !important;
+        font-weight: 600 !important;
+        font-size: 0.82rem !important;
+        padding: 0.5rem 1.2rem !important;
+        box-shadow: 0 2px 8px rgba(29, 78, 216, 0.3) !important;
+        transition: all 0.2s !important;
+    }
+    .stButton > button:hover {
+        transform: translateY(-1px) !important;
+        box-shadow: 0 4px 12px rgba(29, 78, 216, 0.4) !important;
+    }
+
+    /* Expanders como cards */
+    [data-testid="stExpander"] {
+        background: white !important;
+        border: 1px solid #e2e8f0 !important;
+        border-radius: 10px !important;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.05) !important;
+    }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 5px; height: 5px; }
+    ::-webkit-scrollbar-track { background: #f8fafc; }
+    ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+
 </style>
 """, unsafe_allow_html=True)
 
@@ -59,13 +169,25 @@ API = os.getenv("BACKEND_URL", "http://127.0.0.1:8000")
 
 def api_get(ep, params=None, timeout=120):
     try:
-        r = requests.get(f"{API}{ep}", params=params, timeout=timeout); r.raise_for_status(); return r.json()
+        r = requests.get(f"{API}{ep}", params=params, timeout=timeout)
+        r.raise_for_status()
+        return r.json()
     except requests.exceptions.ConnectionError:
-        st.error("❌ Backend no disponible. Asegúrate de que corre en :8000"); return None
+        st.error("❌ Backend no disponible. Asegúrate de que corre en :8000")
+        return None
     except requests.exceptions.HTTPError as e:
-        st.error(f"❌ Error {e.response.status_code}: {e.response.json().get('detail', str(e))}"); return None
+        try:
+            detail = e.response.json().get('detail', str(e))
+        except Exception:
+            detail = e.response.text[:200] if e.response.text else str(e)
+        st.error(f"❌ Error {e.response.status_code}: {detail}")
+        return None
+    except requests.exceptions.JSONDecodeError:
+        st.error("❌ El backend devolvió una respuesta inválida. Verifica que Render esté activo.")
+        return None
     except Exception as e:
-        st.error(f"❌ {e}"); return None
+        st.error(f"❌ {e}")
+        return None
 
 def api_post(ep, body=None):
     try:
@@ -579,8 +701,8 @@ with tabs[2]:
                 fig_rend.add_trace(go.Scatter(
                     x=df_r.index, y=df_r["rendimiento"]*100,
                     name="Rend. log diario",
-                    line=dict(color="#A78BFA", width=0.8),
-                    fill="tozeroy", fillcolor="rgba(167,139,250,0.1)",
+                    line=dict(color="#2563eb", width=0.8),
+                    fill="tozeroy", fillcolor="rgba(37,99,235,0.08)",
                 ))
                 try:
                     fig_rend.update_layout(**plotly_layout(f"Serie log diaria — {t}", height=280))
@@ -618,7 +740,7 @@ with tabs[2]:
                 fig_qq = go.Figure()
                 fig_qq.add_trace(go.Scatter(
                     x=cuantiles_teo, y=rend_sorted, mode="markers",
-                    name="Datos", marker=dict(color="#A5B4FC", size=3, opacity=0.7),
+                    name="Datos", marker=dict(color="#2563eb", size=3, opacity=0.7),
                 ))
                 fig_qq.add_trace(go.Scatter(
                     x=[min(cuantiles_teo), max(cuantiles_teo)],
@@ -703,7 +825,7 @@ with tabs[3]:
                 fig_vol.add_trace(go.Scatter(
                     x=df_p.index, y=df_p["rendimiento_log"].abs() * 100,
                     name="|Rendimiento| diario",
-                    line=dict(color="rgba(167, 139, 250, 0.4)", width=0.8),
+                    line=dict(color="#1d4ed8", width=1.2),
                 ))
                 fig_vol.add_trace(go.Scatter(
                     x=df_p.index, y=df_p["vol_movil"],
@@ -1312,14 +1434,14 @@ with tabs[7]:
     st.markdown("""
         <style>
         .semaforo-verde {
-            background-color: rgba(16,185,129,0.12);
-            border: 1px solid #10b981;
-            padding: 15px; border-radius: 10px; color: #ffffff !important;
+        background-color: rgba(16,185,129,0.15);
+        border: 1px solid #10b981;
+        padding: 15px; border-radius: 10px; color: #065f46 !important;
         }
         .semaforo-rojo {
-            background-color: rgba(239,68,68,0.12);
-            border: 1px solid #ef4444;
-            padding: 15px; border-radius: 10px; color: #ffffff !important;
+        background-color: rgba(239,68,68,0.15);
+        border: 1px solid #ef4444;
+        padding: 15px; border-radius: 10px; color: #7f1d1d !important;
         }
         .semaforo-amarillo {
             background-color: #fef08a;
