@@ -1,0 +1,35 @@
+{
+  "mejor_modelo": "XGBoost",
+  "accuracy": 0.5329,
+  "fecha_entrenamiento": "2026-05-27T21:47:03.998025",
+  "comparacion": {
+    "Random Forest": {
+      "accuracy": 0.5197,
+      "precision": 0.5333,
+      "recall": 0.7901,
+      "mejores_params": {
+        "max_depth": 3,
+        "n_estimators": 100
+      }
+    },
+    "XGBoost": {
+      "accuracy": 0.5329,
+      "precision": 0.5532,
+      "recall": 0.642,
+      "mejores_params": {
+        "learning_rate": 0.2,
+        "max_depth": 3,
+        "n_estimators": 50
+      }
+    },
+    "Logistic Regression": {
+      "accuracy": 0.5329,
+      "precision": 0.5329,
+      "recall": 1.0,
+      "mejores_params": {
+        "C": 10.0
+      }
+    }
+  },
+  "ruta": "app/ml/model.joblib"
+}

@@ -2057,7 +2057,43 @@ with tabs[11]:
 
 with tabs[12]:
     st.subheader("🤖 Inteligencia Artificial — Predicción de Tendencia")
-    st.info("Random Forest Classifier predice si el precio de mañana subirá o bajará basado en indicadores técnicos.", icon="🧠")
+
+    # ── Estado del modelo ──
+    estado_ml = api_get("/ml/estado")
+    if estado_ml and estado_ml.get("modelo_entrenado"):
+        col_e1, col_e2, col_e3, col_e4 = st.columns(4)
+        col_e1.metric("🏆 Mejor Modelo", estado_ml.get("mejor_modelo", "—"))
+        col_e2.metric("🎯 Accuracy", f"{estado_ml.get('accuracy', 0):.2%}")
+        fecha_ent = estado_ml.get("fecha_entrenamiento", "—")
+        if fecha_ent != "—":
+            from datetime import datetime
+            fecha_fmt = datetime.fromisoformat(fecha_ent).strftime("%d/%m/%Y %H:%M")
+        else:
+            fecha_fmt = "—"
+        col_e3.metric("📅 Último Entrenamiento", fecha_fmt)
+        necesita = estado_ml.get("necesita_reentrenamiento", False)
+        col_e4.metric("🔄 Reentrenamiento", "⚠️ Necesario" if necesita else "✅ Vigente")
+
+        # Tabla comparativa de modelos
+        if estado_ml.get("comparacion_modelos"):
+            st.markdown("### 📊 Comparación de Modelos")
+            comp = estado_ml["comparacion_modelos"]
+            rows = []
+            for nombre, metricas in comp.items():
+                es_mejor = nombre == estado_ml.get("mejor_modelo")
+                rows.append({
+                    "Modelo": f"⭐ {nombre}" if es_mejor else nombre,
+                    "Accuracy": f"{metricas['accuracy']:.2%}",
+                    "Precisión": f"{metricas['precision']:.2%}",
+                    "Recall": f"{metricas['recall']:.2%}",
+                    "Estado": "✅ SELECCIONADO" if es_mejor else "—",
+                })
+            df_comp = pd.DataFrame(rows).set_index("Modelo")
+            st.dataframe(df_comp, use_container_width=True)
+    else:
+        st.info("⏳ No hay modelo entrenado. Entrena uno primero.", icon="🧠")
+
+    st.divider()
 
     with st.container(border=True):
         col1, col2 = st.columns([1, 1])
@@ -2065,64 +2101,79 @@ with tabs[12]:
         with col1:
             st.markdown("### 🏋️ Entrenamiento")
 
-            # Entrenar ticker individual
             ticker_ml = st.selectbox("Activo a entrenar", tickers, key="ml_t")
-            if st.button("Entrenar Modelo RF", key="btn_ml_t", use_container_width=True):
-                with st.spinner(f"Entrenando Random Forest para {ticker_ml}..."):
-                    d = api_post(f"/ml/entrenar/{ticker_ml}")
+
+            col_opt1, col_opt2 = st.columns(2)
+            with col_opt1:
+                optimizar_hp = st.checkbox("⚙️ Optimizar hiperparámetros", value=True,
+                    help="GridSearchCV busca los mejores parámetros automáticamente")
+            with col_opt2:
+                forzar_ent = st.checkbox("🔄 Forzar reentrenamiento", value=False,
+                    help="Reentrenar aunque no hayan pasado 8 días")
+
+            if st.button("Entrenar Modelos", key="btn_ml_t", use_container_width=True):
+                with st.spinner(f"Entrenando y comparando modelos para {ticker_ml}..."):
+                    params = f"?optimizar={str(optimizar_hp).lower()}&forzar={str(forzar_ent).lower()}"
+                    d = api_post(f"/ml/entrenar/{ticker_ml}{params}")
                 if d:
-                    st.session_state[f"ml_trained_{ticker_ml}"] = d
-                    st.success(f"✅ Modelo entrenado para {ticker_ml}")
-                    st.metric("Precisión (Accuracy)", f"{d['accuracy']:.2%}")
+                    if d.get("mensaje") == "Modelo vigente":
+                        st.info(f"ℹ️ Modelo vigente — entrenado hace {d.get('dias_desde_entrenamiento', 0)} días. Activa 'Forzar reentrenamiento' para actualizar.")
+                    else:
+                        st.session_state[f"ml_trained_{ticker_ml}"] = d
+                        st.success(f"✅ Mejor modelo: **{d.get('mejor_modelo')}** — Accuracy: {d.get('accuracy', 0):.2%}")
+                        if d.get("comparacion"):
+                            rows = []
+                            for nombre, metricas in d["comparacion"].items():
+                                es_mejor = nombre == d.get("mejor_modelo")
+                                rows.append({
+                                    "Modelo": f"⭐ {nombre}" if es_mejor else nombre,
+                                    "Accuracy": f"{metricas['accuracy']:.2%}",
+                                    "Precisión": f"{metricas['precision']:.2%}",
+                                    "Recall": f"{metricas['recall']:.2%}",
+                                })
+                            st.dataframe(pd.DataFrame(rows).set_index("Modelo"), use_container_width=True)
+                        st.rerun()
 
             st.divider()
 
-            # Entrenar todos
-            if st.button("🚀 Entrenar TODOS los activos", key="btn_ml_all", use_container_width=True, type="primary"):
-                progreso = st.progress(0, text="Iniciando entrenamiento...")
-                for i, t in enumerate(tickers):
-                    progreso.progress((i+1)/len(tickers), text=f"Entrenando {t}...")
-                    d = api_post(f"/ml/entrenar/{t}")
-                    if d:
-                        st.session_state[f"ml_trained_{t}"] = d
-                progreso.empty()
-                st.success(f"✅ Todos los modelos entrenados")
+            if st.button("🚀 Entrenar TODOS los activos", key="btn_ml_all",
+                         use_container_width=True, type="primary"):
+                with st.spinner("Entrenando y comparando modelos con todos los activos..."):
+                    params = f"?optimizar={str(optimizar_hp).lower()}&forzar={str(forzar_ent).lower()}"
+                    d = api_post(f"/ml/entrenar-todos{params}")
+                if d:
+                    if d.get("mensaje") == "Modelo vigente":
+                        st.info("ℹ️ Modelo vigente. Activa 'Forzar reentrenamiento' para actualizar.")
+                    else:
+                        st.success(f"✅ Mejor modelo: **{d.get('mejor_modelo')}** — Accuracy: {d.get('accuracy', 0):.2%}")
+                        for t in tickers:
+                            d_pred = api_post(f"/ml/predecir/{t}")
+                            if d_pred:
+                                st.session_state[f"ml_pred_{t}"] = d_pred
+                        st.rerun()
 
-                # Predecir todos automáticamente
-                progreso2 = st.progress(0, text="Generando predicciones...")
-                for i, t in enumerate(tickers):
-                    progreso2.progress((i+1)/len(tickers), text=f"Prediciendo {t}...")
-                    d_pred = api_post(f"/ml/predecir/{t}")
-                    if d_pred:
-                        st.session_state[f"ml_pred_{t}"] = d_pred
-                progreso2.empty()
-                st.success("✅ Predicciones generadas para todos los activos")
-                
-            # Mostrar precisiones guardadas
             modelos_entrenados = [t for t in tickers if f"ml_trained_{t}" in st.session_state]
             if modelos_entrenados:
-                st.markdown("#### 📊 Precisión por Activo")
+                st.markdown("#### 🎯 Accuracy por Activo")
                 for t in modelos_entrenados:
-                    acc = st.session_state[f"ml_trained_{t}"]["accuracy"]
+                    acc = st.session_state[f"ml_trained_{t}"].get("accuracy", 0)
+                    mejor = st.session_state[f"ml_trained_{t}"].get("mejor_modelo", "—")
                     color = "🟢" if acc >= 0.6 else "🟡" if acc >= 0.5 else "🔴"
-                    st.write(f"{color} **{t}:** {acc:.2%}")
+                    st.write(f"{color} **{t}:** {acc:.2%} — {mejor}")
 
         with col2:
             st.markdown("### 🔮 Predicción")
-
             ticker_p = st.selectbox("Activo a predecir", tickers, key="ml_p")
 
-            # Verificar si está entrenado
-            if f"ml_trained_{ticker_p}" not in st.session_state:
-                st.warning(f"⚠️ Entrena el modelo de {ticker_p} primero.")
-            
+            if f"ml_trained_{ticker_p}" not in st.session_state and not (estado_ml and estado_ml.get("modelo_entrenado")):
+                st.warning(f"⚠️ Entrena el modelo primero.")
+
             if st.button("Ejecutar Predicción", key="btn_ml_p", use_container_width=True):
                 with st.spinner(f"Prediciendo {ticker_p}..."):
                     d = api_post(f"/ml/predecir/{ticker_p}")
                 if d:
                     st.session_state[f"ml_pred_{ticker_p}"] = d
 
-            # Mostrar predicción guardada
             pred = st.session_state.get(f"ml_pred_{ticker_p}")
             if pred:
                 prob = pred['probabilidad']
@@ -2130,7 +2181,6 @@ with tabs[12]:
                 color = "#10b981" if label == "SUBE" else "#ef4444"
                 emoji = "📈" if label == "SUBE" else "📉"
 
-                # Gauge
                 fig_gauge = go.Figure(go.Indicator(
                     mode="gauge+number+delta",
                     value=prob * 100,
@@ -2148,15 +2198,13 @@ with tabs[12]:
                         ],
                         'threshold': {
                             'line': {'color': "white", 'width': 3},
-                            'thickness': 0.75,
-                            'value': 50
+                            'thickness': 0.75, 'value': 50
                         }
                     }
                 ))
                 fig_gauge.update_layout(height=280, margin=dict(l=20, r=20, t=60, b=20))
                 st.plotly_chart(fig_gauge, use_container_width=True)
 
-                # Precio actual y señal monetaria
                 precio_act = 100.0
                 try:
                     p = cached_get(f"/precios/{ticker_p}")
@@ -2165,11 +2213,11 @@ with tabs[12]:
 
                 confianza = "ALTA" if prob > 0.7 else "MEDIA" if prob > 0.55 else "BAJA"
                 st.markdown(f"""
-                **Precio actual {ticker_p}:** USD {precio_act:,.2f}  
+                **Precio actual {ticker_p}:** USD {precio_act:,.2f}
                 **Señal:** {emoji} {label} con confianza **{confianza}** ({prob:.1%})
+                **Modelo usado:** {estado_ml.get('mejor_modelo', 'Random Forest') if estado_ml else 'Random Forest'}
                 """)
 
-    # Predicciones de todos los activos entrenados
     preds_guardadas = {t: st.session_state[f"ml_pred_{t}"]
                        for t in tickers if f"ml_pred_{t}" in st.session_state}
     if preds_guardadas:
@@ -2183,38 +2231,24 @@ with tabs[12]:
             confianza = "ALTA" if prob > 0.7 else "MEDIA" if prob > 0.55 else "BAJA"
             color_delta = "normal" if label == "SUBE" else "inverse"
             with cols[i]:
-                st.metric(
-                    f"{emoji} {t}",
-                    label,
-                    delta=f"{prob:.1%} — {confianza}",
-                    delta_color=color_delta
-                )
+                st.metric(f"{emoji} {t}", label,
+                    delta=f"{prob:.1%} — {confianza}", delta_color=color_delta)
 
         st.divider()
-        st.markdown("#### 📖 Interpretación de Señales")
         compras = sum(1 for p in preds_guardadas.values() if p['direccion'].upper() == "SUBE")
         ventas = sum(1 for p in preds_guardadas.values() if p['direccion'].upper() == "BAJA")
         total = len(preds_guardadas)
 
         if compras > ventas:
-            st.success(f"📈 **Sesgo alcista del portafolio** — {compras}/{total} activos con señal de SUBE.")
+            st.success(f"📈 **Sesgo alcista** — {compras}/{total} activos con señal de SUBE.")
         elif ventas > compras:
-            st.error(f"📉 **Sesgo bajista del portafolio** — {ventas}/{total} activos con señal de BAJA.")
+            st.error(f"📉 **Sesgo bajista** — {ventas}/{total} activos con señal de BAJA.")
         else:
-            st.warning(f"⚖️ **Portafolio neutral** — señales mixtas, sin tendencia clara.")
-
-        st.markdown("""
-        | Confianza | Significado |
-        |---|---|
-        | **ALTA (>70%)** | El modelo está muy seguro de su predicción |
-        | **MEDIA (55-70%)** | Señal moderada, considerar otros indicadores |
-        | **BAJA (<55%)** | Señal débil, el modelo tiene poca certeza |
-        """)
+            st.warning(f"⚖️ **Portafolio neutral** — señales mixtas.")
 
         st.info("""
-        ⚠️ **Importante:** estas predicciones son generadas por un modelo de Machine Learning 
-        entrenado con datos históricos. No constituyen asesoramiento financiero. 
-        La precisión del modelo (~50%) indica que los mercados son difíciles de predecir de forma consistente.
+        ⚠️ **Importante:** predicciones basadas en ML con datos históricos.
+        No constituyen asesoramiento financiero.
         """)
 
 
