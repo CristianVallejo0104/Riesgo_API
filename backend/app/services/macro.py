@@ -20,11 +20,11 @@ FRED_BASE = "https://api.stlouisfed.org/fred/series/observations"
 
 class MacroService:
     def __init__(self):
-        if not settings.fred_api_key:
-            raise ValueError("FRED_API_KEY no configurada en .env")
         self.api_key = settings.fred_api_key
 
     def _get_serie(self, serie: str, timeout: int = 5) -> float | None:
+        if not self.api_key:
+            return None
         try:
             r = requests.get(FRED_BASE, params={
                 "series_id": serie,

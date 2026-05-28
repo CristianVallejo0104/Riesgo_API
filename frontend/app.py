@@ -167,6 +167,12 @@ API = os.getenv("BACKEND_URL", "http://127.0.0.1:8000")
 
 # ═══════════════════ HELPERS ═══════════════════
 
+def api_error_detail(response):
+    try:
+        return response.json().get("detail", response.reason)
+    except ValueError:
+        return response.text.strip() or response.reason
+
 def api_get(ep, params=None, timeout=120):
     try:
         r = requests.get(f"{API}{ep}", params=params, timeout=timeout)
@@ -176,11 +182,7 @@ def api_get(ep, params=None, timeout=120):
         st.error("❌ Backend no disponible. Asegúrate de que corre en :8000")
         return None
     except requests.exceptions.HTTPError as e:
-        try:
-            detail = e.response.json().get('detail', str(e))
-        except Exception:
-            detail = e.response.text[:200] if e.response.text else str(e)
-        st.error(f"❌ Error {e.response.status_code}: {detail}")
+        st.error(f"❌ Error {e.response.status_code}: {api_error_detail(e.response)}")
         return None
     except requests.exceptions.JSONDecodeError:
         st.error("❌ El backend devolvió una respuesta inválida. Verifica que Render esté activo.")
@@ -195,7 +197,7 @@ def api_post(ep, body=None):
     except requests.exceptions.ConnectionError:
         st.error("❌ Backend no disponible."); return None
     except requests.exceptions.HTTPError as e:
-        st.error(f"❌ Error {e.response.status_code}: {e.response.json().get('detail', str(e))}"); return None
+        st.error(f"❌ Error {e.response.status_code}: {api_error_detail(e.response)}"); return None
     except Exception as e:
         st.error(f"❌ {e}"); return None
 
@@ -467,7 +469,7 @@ tabs = st.tabs([
 "🎯 Contexto", "📈 1. Técnico", "📉 2. Rendimientos", "🌊 3. Volatilidad",
 "🎯 4. CAPM", "🛡️ 5. VaR/CVaR", "⚡ 6. Markowitz",
 "🚦 7. Señales", "🌐 8. Macro", "📐 9. Renta Fija",
-"🧮 10. Opciones", "💥 11. Stress", "🤖 ML", "🧠 Agente IA",
+"🧮 10. Opciones", "💥 11. Stress", "🤖 ML", "🧩 Arquitectura Técnica", "🧠 Agente IA",
 ])
 
 
@@ -2259,9 +2261,290 @@ with tabs[12]:
         st.info("⚠️ **Importante:** predicciones basadas en ML con datos históricos. No constituyen asesoramiento financiero.")
 
 
-# ═══════════════════ AGENTE IA ═══════════════════
+# ═══════════════════ ARQUITECTURA TÉCNICA ═══════════════════
 
 with tabs[13]:
+    st.subheader("🧩 Arquitectura Técnica — Del dato a la visualización")
+    st.markdown(
+        "Explora un llamado real del sistema y observa cómo cambia el recorrido entre "
+        "**Streamlit**, **FastAPI**, **SQLAlchemy** y **SQLite**."
+    )
+
+    recorridos = {
+        "Lectura de precios": {
+            "color": "#1a56db",
+            "metodo": "GET",
+            "endpoint": "/precios/AAPL",
+            "accion": "SELECT",
+            "recurso": "prices",
+            "salida": "Serie OHLCV",
+            "objetivo": "Recuperar precios previamente almacenados para graficarlos.",
+            "nodos": ["Streamlit", "FastAPI", "Router precios", "SQLAlchemy SELECT", "SQLite", "Plotly"],
+            "etapas": [
+                ("Solicitud", "El usuario elige AAPL y Streamlit solicita precios históricos."),
+                ("Validación", "FastAPI resuelve el endpoint y obtiene una sesión de base de datos."),
+                ("Lectura ORM", "SQLAlchemy busca el activo y sus registros de precios."),
+                ("Respuesta", "SQLite entrega filas y la API las serializa como JSON."),
+                ("Visualización", "Plotly dibuja la serie de precios en el dashboard."),
+            ],
+            "request": 'requests.get(f"{API}/precios/AAPL")',
+            "orm": (
+                'asset = db.scalars(select(Asset).where(Asset.ticker == "AAPL")).first()\n'
+                "precios = db.scalars(\n"
+                "    select(Price).where(Price.asset_id == asset.id)\n"
+                ").all()"
+            ),
+            "json": '[{"fecha": "2026-05-26", "close": 201.42, "volume": 45210300}]',
+            "presentacion": "Gráfico de velas y rendimiento base 100",
+        },
+        "Persistencia desde Yahoo": {
+            "color": "#059669",
+            "metodo": "POST",
+            "endpoint": "/precios/descargar/AAPL",
+            "accion": "INSERT / COMMIT",
+            "recurso": "assets + prices",
+            "salida": "Cache actualizada",
+            "objetivo": "Descargar precios externos y persistir solo las fechas nuevas.",
+            "nodos": ["Streamlit", "FastAPI", "DataService", "yfinance", "SQLAlchemy COMMIT", "SQLite"],
+            "etapas": [
+                ("Acción", "El usuario inicializa el portafolio desde Streamlit."),
+                ("Descarga", "FastAPI delega a DataService y consulta Yahoo Finance."),
+                ("Control", "Se verifica si el activo y cada fecha ya existen."),
+                ("Escritura ORM", "Los nuevos objetos Price se agregan y confirman."),
+                ("Cache", "SQLite conserva los datos para consultas posteriores."),
+            ],
+            "request": 'requests.post(f"{API}/precios/descargar/AAPL")',
+            "orm": (
+                "precio = Price(asset_id=activo.id, fecha=fecha_date, close=close, ...)\n"
+                "self.db.add(precio)\n"
+                "self.db.commit()"
+            ),
+            "json": '{"ticker": "AAPL", "registros_disponibles": 756, "cache": "actualizada"}',
+            "presentacion": "Confirmación de descarga y datos habilitados",
+        },
+        "Análisis de riesgo": {
+            "color": "#7c3aed",
+            "metodo": "GET",
+            "endpoint": "/analisis/var/AAPL",
+            "accion": "SELECT + CÁLCULO",
+            "recurso": "prices",
+            "salida": "VaR / CVaR",
+            "objetivo": "Leer datos persistidos, calcular riesgo y presentar métricas.",
+            "nodos": ["Streamlit", "FastAPI", "RiskService", "SQLAlchemy SELECT", "SQLite", "Métricas"],
+            "etapas": [
+                ("Parámetros", "Streamlit envía ticker, periodo y nivel de confianza."),
+                ("Datos", "El endpoint carga precios históricos desde SQLite."),
+                ("Cálculo", "RiskService transforma precios en rendimientos logarítmicos."),
+                ("Métrica", "Se estiman VaR paramétrico, histórico, Monte Carlo y CVaR."),
+                ("Resultado", "Streamlit presenta indicadores y gráficos comparativos."),
+            ],
+            "request": 'requests.get(f"{API}/analisis/var/AAPL", params={"nivel": 0.95})',
+            "orm": (
+                "precios = db.scalars(\n"
+                "    select(Price).where(Price.asset_id == asset.id).order_by(Price.fecha)\n"
+                ").all()\n"
+                "resultado = RiskService(df).var_historico()"
+            ),
+            "json": '{"var_historico": -0.0214, "cvar": -0.0318, "nivel": 0.95}',
+            "presentacion": "Tarjetas VaR/CVaR y análisis de exposición",
+        },
+    }
+
+    st.markdown("#### Elige el caso que quieres explicar")
+    recorrido = st.radio(
+        "Recorrido técnico",
+        list(recorridos.keys()),
+        horizontal=True,
+        key="arquitectura_recorrido",
+        label_visibility="collapsed",
+    )
+    escenario = recorridos[recorrido]
+
+    st.markdown(
+        f"""
+        <div style="border-left:6px solid {escenario['color']}; background:#ffffff;
+                    padding:14px 18px; border-radius:10px; margin:8px 0 18px 0;">
+          <div style="font-size:12px; font-weight:700; color:{escenario['color']};">
+            RECORRIDO ACTIVO · {escenario['metodo']} {escenario['endpoint']}
+          </div>
+          <div style="font-size:16px; font-weight:600; margin-top:5px;">{recorrido}</div>
+          <div style="font-size:13px; color:#475569; margin-top:5px;">{escenario['objetivo']}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Petición HTTP", escenario["metodo"])
+    c1.caption(escenario["endpoint"])
+    c2.metric("Operación ORM", escenario["accion"])
+    c2.caption("SQLAlchemy 2.0")
+    c3.metric("Tabla / recurso", escenario["recurso"])
+    c3.caption("SQLite · `risklab.db`")
+    c4.metric("Resultado final", escenario["salida"])
+    c4.caption(escenario["presentacion"])
+
+    flujo_tab, sql_tab, infraestructura_tab = st.tabs(
+        ["🔄 Flujo de llamados", "🗃️ SQL y consultas", "🐳 Infraestructura"]
+    )
+
+    with flujo_tab:
+        st.markdown(f"### Ruta activa: {recorrido}")
+        nodos = escenario["nodos"]
+        x_pos = list(range(len(nodos)))
+        fig_flujo = go.Figure()
+        fig_flujo.add_trace(go.Scatter(
+            x=x_pos,
+            y=[0] * len(nodos),
+            mode="lines",
+            line=dict(color=escenario["color"], width=4),
+            hoverinfo="skip",
+        ))
+        fig_flujo.add_trace(go.Scatter(
+            x=x_pos,
+            y=[0] * len(nodos),
+            mode="markers+text",
+            marker=dict(size=38, color=escenario["color"], line=dict(width=3, color="white")),
+            text=[str(i + 1) for i in x_pos],
+            textfont=dict(color="white", size=14),
+            textposition="middle center",
+            hovertext=nodos,
+            hovertemplate="%{hovertext}<extra></extra>",
+        ))
+        fig_flujo.update_layout(
+            height=190,
+            margin=dict(l=20, r=20, t=15, b=55),
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
+            showlegend=False,
+            xaxis=dict(
+                tickmode="array", tickvals=x_pos, ticktext=nodos,
+                showgrid=False, zeroline=False, tickfont=dict(size=11),
+            ),
+            yaxis=dict(visible=False, range=[-0.2, 0.2]),
+        )
+        st.plotly_chart(fig_flujo, use_container_width=True)
+
+        for numero, (titulo, detalle) in enumerate(escenario["etapas"], start=1):
+            with st.expander(f"{numero}. {titulo}", expanded=numero == 1):
+                st.markdown(detalle)
+
+        peticion, respuesta = st.columns(2)
+        with peticion:
+            st.markdown("**Llamado desde Streamlit**")
+            st.code(escenario["request"], language="python")
+        with respuesta:
+            st.markdown("**Respuesta consumida por la visualización**")
+            st.code(escenario["json"], language="json")
+
+    with sql_tab:
+        st.markdown(f"### SQLAlchemy en el recorrido: {recorrido}")
+        st.info(
+            "El proyecto usa SQL a través del ORM de **SQLAlchemy**: el código "
+            "trabaja con modelos Python y `select(...)`; SQLAlchemy genera las "
+            "sentencias que SQLite ejecuta."
+        )
+
+        izquierda, derecha = st.columns([1.05, 0.95])
+        with izquierda:
+            with st.container(border=True):
+                st.markdown(f"**Operación elegida: `{escenario['accion']}`**")
+                st.caption(f"Endpoint involucrado: `{escenario['metodo']} {escenario['endpoint']}`")
+                st.code(escenario["orm"], language="python")
+
+            with st.expander("Conexión e inicialización"):
+                st.markdown(
+                    "`backend/app/database.py` crea el engine, abre sesiones por "
+                    "request y crea las tablas al iniciar FastAPI."
+                )
+                st.code(
+                    'engine = create_engine(\n'
+                    '    settings.database_url,\n'
+                    '    connect_args={"check_same_thread": False},\n'
+                    ')\n'
+                    'SessionLocal = sessionmaker(bind=engine)\n'
+                    'Base.metadata.create_all(bind=engine)',
+                    language="python",
+                )
+
+        with derecha:
+            st.markdown("#### Evidencia en la base de datos")
+            tablas = pd.DataFrame(
+                [
+                    {"Tabla": "assets", "Rol": "Catálogo de tickers", "Interviene": recorrido != "Análisis de riesgo"},
+                    {"Tabla": "prices", "Rol": "Históricos OHLCV", "Interviene": True},
+                    {"Tabla": "portfolios", "Rol": "Asignación y pesos", "Interviene": False},
+                    {"Tabla": "prediction_logs", "Rol": "Salida de ML", "Interviene": False},
+                    {"Tabla": "signals_log", "Rol": "Alertas técnicas", "Interviene": False},
+                ]
+            )
+            tablas["Interviene"] = tablas["Interviene"].map({True: "Sí", False: "No"})
+            st.dataframe(tablas, use_container_width=True, hide_index=True)
+
+            with st.expander("Modelos ORM verificados"):
+                st.markdown(
+                    "Las tablas ORM verificadas son **assets**, **prices**, "
+                    "**portfolios**, **prediction_logs** y **signals_log**."
+                )
+                st.code(
+                    'class Price(Base):\n'
+                    '    __tablename__ = "prices"\n'
+                    '    asset_id = mapped_column(ForeignKey("assets.id"))\n'
+                    '    fecha = mapped_column(Date)\n'
+                    '    close = mapped_column(Float)',
+                    language="python",
+                )
+
+        st.success(
+            f"En este recorrido, SQLite actúa como **{('cache persistente' if recorrido == 'Persistencia desde Yahoo' else 'fuente local de datos')}** "
+            f"y la interfaz termina mostrando: **{escenario['presentacion']}**."
+        )
+
+    with infraestructura_tab:
+        col_docker, col_bricks = st.columns(2)
+        with col_docker:
+            with st.container(border=True):
+                st.markdown("### 🐳 Docker")
+                st.markdown(
+                    "El repositorio incluye contenedores separados para la API y "
+                    "el dashboard. `docker-compose.yml` publica ambos puertos y "
+                    "monta `risklab.db` para conservar los datos del backend."
+                )
+                st.code(
+                    "frontend:8501  -->  http://backend:8000\n"
+                    "backend:8000   -->  /app/risklab.db (volumen)",
+                    language="text",
+                )
+                st.caption(
+                    f"El recorrido **{recorrido}** viaja por esta red como "
+                    f"`{escenario['metodo']} {escenario['endpoint']}`."
+                )
+
+        with col_bricks:
+            with st.container(border=True):
+                st.markdown("### 🧱 Bricks / Databricks")
+                st.warning("No está implementado en este repositorio.")
+                st.markdown(
+                    "No se encontraron imports, configuración, conectores ni "
+                    "jobs de **Databricks**. La persistencia actual es local con "
+                    "**SQLite**; Databricks aplicaría solo si se migrara a un "
+                    "pipeline distribuido o a almacenamiento analítico cloud."
+                )
+
+        with st.expander("📌 Guion rápido para la presentación", expanded=True):
+            st.markdown(
+                f"**Caso seleccionado: {recorrido}.**\n\n"
+                f"1. Streamlit dispara `{escenario['metodo']} {escenario['endpoint']}`.\n"
+                f"2. FastAPI entrega una sesión SQLAlchemy y ejecuta **{escenario['accion']}**.\n"
+                f"3. SQLite participa sobre **{escenario['recurso']}** en `risklab.db`.\n"
+                f"4. La API devuelve **{escenario['salida']}** y el dashboard muestra **{escenario['presentacion']}**.\n"
+                "5. Docker empaqueta frontend y backend; **Databricks no forma parte** de la solución actual."
+            )
+
+
+# ═══════════════════ AGENTE IA ═══════════════════
+
+with tabs[14]:
     st.subheader("🧠 RiskLab AI — Agente Financiero Inteligente")
     st.info("Análisis de riesgo en lenguaje natural potenciado por **llama3** corriendo localmente con Ollama.", icon="🤖")
 
