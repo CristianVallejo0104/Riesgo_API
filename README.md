@@ -20,16 +20,27 @@
 
 ## 📋 Descripción
 
-RiskLab USTA es un sistema integral de análisis de riesgo financiero construido con **FastAPI** en el backend, persistencia en **SQLite** vía **SQLAlchemy ORM**, y un dashboard interactivo en **Streamlit**. Integra datos en tiempo real de **Yahoo Finance** y **FRED API**.
+RiskLab USTA es un sistema integral de análisis de riesgo financiero construido con **FastAPI** en el backend, persistencia en **SQLite** vía **SQLAlchemy ORM**, y un tablero interactivo en **Streamlit**. Integra datos de **Yahoo Finance** y **FRED API**, y permite analizar portafolios de **Estados Unidos (USD)** o de **Colombia (COP)**.
+
+El tablero está pensado para que **cualquier persona**, aunque no sepa de finanzas ni de estadística, entienda sus resultados. Cada módulo trae un semáforo, una explicación "en palabras simples" y una tabla de cómo leer cada indicador.
+
+> 📘 **Teoría detrás de cada cálculo, pasos para probar y contexto completo:** [`docs/CONTEXTO_CLAUDE.md`](docs/CONTEXTO_CLAUDE.md)
+
+### 🌿 Ramas del repositorio
+
+| Rama | Contenido |
+|---|---|
+| `main` | **Versión actual (v2.1)**: teoría de riesgo corregida, tablero rediseñado, mercado colombiano. |
+| `version-original` | Código inicial del proyecto (antes de la v2.1), conservado sin cambios. |
 
 ### Arquitectura en 5 Capas
 
 ```
-Capa 1 — Datos y persistencia:   yfinance + FRED → SQLite (cache transparente)
-Capa 2 — Análisis clásico:       Indicadores, Rendimientos, EWMA/GARCH, CAPM, VaR, Markowitz
-Capa 3 — Renta fija y derivados: Nelson-Siegel, Duración, Black-Scholes, Stress Testing
-Capa 4 — Machine Learning:       Random Forest → joblib → Singleton → /predict
-Capa 5 — Infraestructura:        pytest + Docker + Render + GitHub Actions CI
+Capa 1 — Datos y persistencia:   yfinance + FRED → SQLite (descarga incremental + caché)
+Capa 2 — Análisis clásico:       Indicadores, rendimientos, EWMA/GARCH, CAPM, VaR/CVaR, Markowitz
+Capa 3 — Renta fija y derivados: Nelson-Siegel, duración, convexidad, Black-Scholes, stress testing
+Capa 4 — Machine Learning:       Random Forest / XGBoost / Regresión Logística → joblib → /predict
+Capa 5 — Infraestructura:        pytest (46 pruebas) + Docker + Render + GitHub Actions CI
 ```
 
 ```
@@ -179,7 +190,11 @@ cd backend
 python -m pytest tests/ -v
 ```
 
-Los tests usan una BD SQLite en memoria — no afectan los datos reales.
+Los tests usan una BD SQLite en memoria y no afectan los datos reales. Son 46 pruebas:
+- `test_teoria_riesgo.py`: propiedades teóricas (CVaR ≤ VaR, subaditividad, contribuciones de Euler, Kupiec,
+  Black-Scholes contra valores de referencia, paridad put-call, bono a la par, duración del cupón cero = plazo, etc.).
+- `test_endpoints_analisis.py`: endpoints de análisis con precios sintéticos (VaR por nivel, pesos, CAPM, stress).
+- `test_endpoints.py`, `test_indicators.py`, `test_risk.py`: API básica e indicadores.
 
 ---
 
@@ -190,7 +205,7 @@ cd backend
 python -m app.ml.train
 ```
 
-**Propósito analítico:** El modelo predice la dirección del precio (sube/baja) al día siguiente usando los retornos logarítmicos de los últimos 5 días como features (lags). Se usa un `RandomForestClassifier` con 100 árboles entrenado con datos históricos de Yahoo Finance.
+**Propósito analítico:** El modelo predice la dirección del precio (sube/baja) al día siguiente usando los retornos logarítmicos de los últimos 5 días como features (lags). Compara Random Forest, XGBoost y Regresión Logística (con GridSearchCV opcional), elige el de mayor accuracy y se reentrena cada 8 días.
 
 - **Features:** retorno_lag1, retorno_lag2, retorno_lag3, retorno_lag4, retorno_lag5
 - **Target:** 1 si el retorno del día siguiente > 0, 0 si no
@@ -210,8 +225,9 @@ python -m app.ml.train
 | **XOM** | ExxonMobil | Energía | Diversificación con commodities. Correlación negativa en crisis. |
 | **KO** | Coca-Cola | Consumo básico | Máxima estabilidad. Beta < 1. Ideal para reducir riesgo del portafolio. |
 
-**Benchmark:** S&P 500 (^GSPC)  
-**Período de análisis:** 3 años de historia (configurable desde el sidebar)
+**Benchmark:** S&P 500 (^GSPC). Para Colombia, ICOLCAP.CL / ^COLCAP / GXG, o cualquier índice escrito por el usuario.  
+**Período de análisis:** 3 años de historia (configurable desde el sidebar)  
+**Portafolios de ejemplo:** Base USTA, Tecnología, Defensivo, Financiero, Balanceado, Colombia (líderes COLCAP, bancos, ADR).
 
 ---
 
@@ -221,32 +237,36 @@ python -m app.ml.train
 |---|---|---|
 | `/health` | GET | Estado de la API |
 | `/activos/` | GET/POST | Lista y crea activos |
-| `/precios/{ticker}` | GET | Precios históricos con cache en BD |
-| `/precios/descargar/{ticker}` | POST | Descarga y persiste precios |
+| `/precios/{ticker}` | GET | Precios históricos guardados en BD (ordenados por fecha) |
+| `/precios/descargar/{ticker}` | POST | Descarga incremental desde Yahoo Finance |
 | `/portafolios/` | GET/POST | CRUD de portafolios |
-| `/analisis/rendimientos/{ticker}` | GET | Rendimientos y estadísticas empíricas |
+| `/analisis/resumen-portafolio` | GET | Panel ejecutivo: rentabilidad, volatilidad, Sharpe, Sortino, drawdown, VaR/CVaR, beta |
+| `/analisis/rendimientos/{ticker}` | GET | Estadísticas empíricas, curtosis en exceso, Jarque-Bera, Shapiro-Wilk |
 | `/analisis/rendimientos-serie/{ticker}` | GET | Serie temporal de rendimientos log |
-| `/analisis/indicadores/{ticker}` | GET | SMA, EMA, RSI, MACD, Bollinger, Estocástico |
-| `/analisis/ewma/{ticker}` | GET | Volatilidad EWMA (RiskMetrics λ=0.94) |
-| `/analisis/garch/{ticker}` | GET | GARCH/EGARCH/GJR-GARCH con selección AIC/BIC |
-| `/analisis/var/{ticker}` | GET | VaR paramétrico, histórico, Monte Carlo + CVaR |
-| `/analisis/var-portafolio` | GET | VaR del portafolio completo con diversificación |
-| `/analisis/capm` | GET | Beta, Alpha Jensen, R², clasificación |
-| `/analisis/markowitz` | GET | Frontera eficiente con QP (cvxpy) + tickers dinámicos |
+| `/analisis/indicadores/{ticker}` | GET | SMA, EMA, RSI (Wilder), MACD, Bollinger, Estocástico |
+| `/analisis/ewma/{ticker}` | GET | Volatilidad EWMA (λ = 0.94) con serie histórica |
+| `/analisis/garch/{ticker}` | GET | 6 modelos GARCH/GJR/EGARCH por AIC, pronóstico, persistencia, vida media, ARCH-LM |
+| `/analisis/var/{ticker}` | GET | VaR paramétrico, Cornish-Fisher, histórico, Monte Carlo t, CVaR y Kupiec (`nivel`, `horizonte`) |
+| `/analisis/var-portafolio` | GET | VaR del portafolio con `pesos`, 3 métodos, CVaR y VaR por componentes |
+| `/analisis/capm` | GET | Beta, alfa de Jensen con p-value, R², riesgo sistemático/idiosincrático |
+| `/analisis/markowitz` | GET | Máximo Sharpe, mínima varianza, tu portafolio, frontera eficiente, correlaciones (`rf`, `permitir_cortos`) |
+| `/analisis/stress-test` | GET | Choques de mercado por beta, volatilidad ×2, correlaciones → 1, peores ventanas reales |
 | `/analisis/alertas` | GET | Señales de trading con persistencia en BD |
-| `/analisis/stress-test` | GET | Stress testing 4 escenarios históricos |
-| `/macro/` | GET | Tasa libre de riesgo + inflación FRED |
-| `/macro/benchmark` | GET | Tracking Error, Information Ratio, Max Drawdown |
-| `/renta-fija/curva` | GET | Curva Nelson-Siegel desde FRED |
-| `/renta-fija/duracion` | GET | Duración Macaulay, modificada y convexidad |
-| `/renta-fija/sensibilidad` | GET | Sensibilidad ante shocks ±50/±100/±200 pb |
-| `/opciones/black-scholes` | GET | Black-Scholes + 5 Greeks (validación Pydantic) |
-| `/opciones/volatilidad-implicita` | GET | Volatilidad implícita Newton-Raphson |
-| `/ml/entrenar/{ticker}` | POST | Entrenamiento offline del modelo RF |
+| `/macro/` | GET | Tasa libre de riesgo (`mercado=US` o `CO`), inflación y curva FRED |
+| `/macro/benchmark` | GET | Tracking error, information ratio, drawdown y Sharpe frente al benchmark |
+| `/renta-fija/curva` | GET | Curva del Tesoro con ajuste Nelson-Siegel |
+| `/renta-fija/duracion` | GET | Precio, duración Macaulay/modificada, convexidad, DV01 (`frecuencia`, `valor_nominal`, `tasa_descuento`) |
+| `/renta-fija/sensibilidad` | GET | Precio ante choques de −200 a +200 pb: lineal, con convexidad y exacto |
+| `/opciones/black-scholes` | GET | Black-Scholes, griegas call/put, probabilidad de ejercicio, paridad put-call |
+| `/opciones/volatilidad-implicita` | GET | Volatilidad implícita (Brent, con límites de no arbitraje) |
+| `/ml/entrenar/{ticker}` | POST | Entrena y compara modelos |
 | `/ml/predecir/{ticker}` | POST | Predicción con logging en BD |
 | `/agente/estado` | GET | Estado de Ollama y modelos disponibles |
-| `/agente/analisis` | POST | Análisis automático del portafolio con LLM |
+| `/agente/analisis` | GET | Informe del portafolio con LLM local |
 | `/agente/chat` | POST | Chat financiero con contexto del portafolio |
+
+Los endpoints de portafolio reciben `tickers` y `pesos` (en el mismo orden) repetidos en la URL, por ejemplo
+`/analisis/var-portafolio?tickers=AAPL&tickers=KO&pesos=0.6&pesos=0.4&nivel=0.99`.
 
 ### Parámetros globales de fecha
 Todos los endpoints de análisis aceptan parámetros opcionales de filtro:
@@ -270,12 +290,12 @@ Riesgo_API/
 │   │   │   └── schemas.py       # Pydantic v2 request/response models
 │   │   ├── services/
 │   │   │   ├── data.py          # DataService + TechnicalIndicators
-│   │   │   ├── risk.py          # VaR, CVaR, EWMA, GARCH, CAPM
-│   │   │   ├── portfolio.py     # Markowitz QP (cvxpy)
-│   │   │   ├── macro.py         # FRED API + cache TTL 1h + fallback automático
-│   │   │   ├── fixed_income.py  # Nelson-Siegel, duración, convexidad
-│   │   │   ├── options.py       # Black-Scholes, Greeks, vol. implícita
-│   │   │   └── stress.py        # Stress testing 4 escenarios
+│   │   │   ├── risk.py          # VaR (4 métodos), CVaR, Kupiec, EWMA, GARCH
+│   │   │   ├── portfolio.py     # Markowitz (máx. Sharpe, mín. varianza) y VaR de portafolio
+│   │   │   ├── macro.py         # FRED (EE. UU. y Colombia) + caché 1h + respaldo
+│   │   │   ├── fixed_income.py  # Nelson-Siegel, bonos con frecuencia y nominal
+│   │   │   ├── options.py       # Black-Scholes, griegas call/put, vol. implícita
+│   │   │   └── stress.py        # Stress por beta, volatilidad, correlación e históricos
 │   │   ├── ml/
 │   │   │   ├── train.py         # Entrenamiento offline
 │   │   │   ├── predictor.py     # Singleton + predict
@@ -293,16 +313,22 @@ Riesgo_API/
 │   ├── tests/
 │   │   ├── conftest.py          # BD en memoria + fixtures
 │   │   ├── test_endpoints.py
+│   │   ├── test_endpoints_analisis.py
 │   │   ├── test_indicators.py
-│   │   └── test_risk.py
+│   │   ├── test_risk.py
+│   │   └── test_teoria_riesgo.py # Propiedades teóricas de los cálculos
 │   ├── Dockerfile               # Multi-stage python:3.11.9-slim-bookworm
 │   ├── docker-compose.yml       # Orquesta backend + frontend
 │   ├── requirements.txt
 │   └── .env.example
 ├── frontend/
-│   ├── app.py                   # Streamlit dashboard (13 módulos + Agente IA)
+│   ├── app.py                   # Tablero: barra lateral + 16 páginas
+│   ├── ui.py                    # Sistema de diseño: colores, KPIs, guías de lectura
+│   ├── .streamlit/config.toml   # Tema (para el contenedor del frontend)
 │   ├── Dockerfile               # Contenedor Streamlit
 │   └── requirements.txt
+├── docs/
+│   └── CONTEXTO_CLAUDE.md       # Teoría, cambios, pruebas y guía de trabajo
 ├── .github/
 │   └── workflows/
 │       └── ci.yml               # GitHub Actions CI/CD

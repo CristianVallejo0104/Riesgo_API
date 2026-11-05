@@ -1545,6 +1545,11 @@ def pagina_markowitz():
                          for t, w in pe["pesos"].items()])
     st.dataframe(dist.style.format({"Peso sugerido": "{:.1%}", f"Monto ({MON})": MON + " {:,.0f}", "Peso actual": "{:.1%}",
                                     f"Cambio ({MON})": "{:+,.0f}"}), use_container_width=True, hide_index=True)
+    if (dist["Peso sugerido"] < -0.001).any():
+        st.caption("**¿Peso negativo?** Con ventas en corto la única regla es que los pesos **sumen 100 %**; cada uno "
+                   "ya no tiene que estar entre 0 % y 100 %. Un peso de −5 % significa vender en corto ese 5 % del capital "
+                   "y usar ese dinero para comprar más de otros activos (por eso alguno puede superar lo normal). "
+                   "Ejemplo: 105 % en KO + (−5 %) en XOM = 100 %. Sin ventas en corto nunca aparecen pesos negativos.")
     ui.nota("La optimización usa rendimientos y correlaciones PASADOS. Pequeños cambios en los datos pueden "
             "cambiar mucho los pesos óptimos; el portafolio de mínima varianza suele ser más estable porque no "
             "depende de pronosticar rendimientos.", "warn")

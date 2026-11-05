@@ -10,15 +10,17 @@
 
 | Rama | Contenido |
 |---|---|
-| `main` | Código original (último commit `770ec14`). **No se ha tocado.** |
-| `ccr-bd062cce-jewh0m` | Todo el trabajo nuevo (backend corregido + tablero rediseñado + Colombia). |
+| `main` | **Versión nueva (v2.1)**, la principal. Incluye todos los cambios de este documento. |
+| `version-original` | Código inicial (commit `770ec14`), conservado sin cambios para no perder nada. |
+| `ccr-bd062cce-jewh0m` | Rama de trabajo donde se hicieron los cambios (ya está fusionada en `main`). |
 
-Commits de la rama, en orden:
+Commits de la v2.1, en orden:
 1. Corrige la teoría de riesgo en el backend y agrega pruebas de coherencia.
 2. Rediseña el tablero: navegación por secciones y guías de lectura.
 3. Bonos con frecuencia y nominal, confianza libre, caché incremental y colores coherentes.
 4. Markowitz: contexto e interpretación de las ventas en corto.
 5. Mercado colombiano: tickers BVC, COLCAP, tasa libre de riesgo de Colombia y COP.
+6. README coherente y aclaración de pesos negativos.
 
 ---
 
@@ -146,13 +148,14 @@ Archivos clave: `backend/app/services/{risk,portfolio,stress,fixed_income,option
 ```powershell
 cd Riesgo_API
 git fetch origin
-git checkout ccr-bd062cce-jewh0m
+git checkout main
 git pull
 python -m venv .venv
 .venv\Scripts\activate
 pip install -r backend/requirements.txt
 ```
-- `git fetch` trae las ramas nuevas, `git checkout` cambia al código nuevo y `git pull` asegura la última versión.
+- `git fetch` trae las ramas nuevas, `git checkout main` se ubica en la versión principal y `git pull` descarga los cambios.
+- Para ver el código original: `git checkout version-original`. Para volver: `git checkout main`.
 - El entorno virtual (`.venv`) aísla las librerías del proyecto.
 
 Correr las pruebas (deben pasar las 46):
@@ -185,25 +188,19 @@ streamlit run frontend/app.py
 
 ---
 
-## 4. Pasarlo a `main`
+## 4. Ramas: qué se hizo y cómo deshacerlo si hace falta
 
-**Opción recomendada:** fusionar con un Pull Request en GitHub. Queda registro y se puede revertir.
-1. En GitHub: *Pull requests → New pull request → base: `main` ← compare: `ccr-bd062cce-jewh0m` → Create → Merge*.
-2. En tu PC: `git checkout main` y luego `git pull`.
-
-**Guardar el código original con nombre propio** (opcional, antes o después de fusionar):
-```powershell
-git branch version-original 770ec14
-git push origin version-original
-```
-La primera línea crea una rama en el commit original; la segunda la sube a GitHub. Igual, ese código nunca se pierde
-porque queda en el historial.
-
-**Despliegue:** Streamlit Cloud y Render toman `main`. Después de fusionar se redespliegan solos (o con "Reboot").
-El frontend ahora necesita `frontend/ui.py` (ya está en el repo) y el tema `.streamlit/config.toml`.
-
-**Si algo sale mal después de fusionar:** en GitHub, el PR tiene el botón *Revert*. O en local:
-`git revert -m 1 <commit-del-merge>` y `git push`.
+- El código nuevo **ya está en `main`**. Se hizo un *fast-forward*: `main` avanzó a los commits nuevos sin crear commits extra.
+- El código inicial quedó en la rama **`version-original`** (commit `770ec14`).
+- **Despliegue:** Streamlit Cloud y Render toman `main`, así que se redespliegan con la versión nueva (si no, usa "Reboot").
+  El frontend necesita `frontend/ui.py` (ya está en el repo).
+- **Si quieres volver al código original en `main`** (no recomendado, pero posible sin perder nada):
+  ```powershell
+  git checkout main
+  git revert --no-edit 770ec14..HEAD
+  git push
+  ```
+  `git revert` crea commits nuevos que deshacen los cambios, así que el historial no se pierde.
 
 ---
 
@@ -213,8 +210,8 @@ Copia y pega esto al abrir el proyecto en tu PC:
 
 ```text
 Estoy trabajando en mi proyecto RiskLab USTA (FastAPI + Streamlit), un sistema de análisis de riesgo
-financiero para la universidad. El repositorio está en mi PC y la rama de trabajo es `ccr-bd062cce-jewh0m`
-(main tiene el código original, commit 770ec14).
+financiero para la universidad. El repositorio está en mi PC. La rama `main` tiene la versión nueva (v2.1) y la rama
+`version-original` tiene el código inicial (commit 770ec14).
 
 Lee primero docs/CONTEXTO_CLAUDE.md: ahí está todo lo que se cambió y la teoría detrás. En resumen:
 - Backend (backend/app/services): VaR paramétrico, Cornish-Fisher, histórico y Monte Carlo t-Student; CVaR;
@@ -233,8 +230,7 @@ Quiero que:
    Finance, siguiendo la lista de verificación de la sección 3 del documento.
 2. Verifiques que los tickers colombianos (.CL) y el benchmark ^COLCAP / ICOLCAP.CL tengan datos en Yahoo;
    si alguno no existe, corrige la lista en TICKERS_DB y BENCHMARKS_CO de frontend/app.py.
-3. Si todo está bien, me guíes para fusionar la rama a main con un Pull Request y crear la rama
-   version-original en el commit 770ec14.
+3. Me ayudes a seguir mejorando el proyecto sobre main, explicando la teoría de riesgo detrás de cada cambio.
 
 Explícame el porqué de cada paso y los comandos línea por línea. Responde en español latinoamericano neutro, sin voseo.
 ```
