@@ -44,12 +44,38 @@ DIVERGENTE = [[0, "#d03b3b"], [0.5, "#f0efec"], [1, "#2a78d6"]]   # rojo - gris 
 SECUENCIAL = [[0, "#cde2fb"], [0.5, "#3987e5"], [1, "#0d366b"]]
 
 
-def color_activo(ticker: str, tickers: list[str]) -> str:
-    """El color sigue a la entidad, no a su posición en un ranking."""
-    try:
+def registrar_colores(tickers: list[str]):
+    """Asigna a cada activo un color la primera vez que aparece y lo conserva toda la
+    sesión: el color sigue a la entidad, no a su posición en la lista."""
+    mapa = st.session_state.setdefault("_colores_activos", {})
+    for t in tickers:
+        if t not in mapa:
+            usados = set(mapa.values())
+            libre = next((c for c in SERIES if c not in usados), None)
+            mapa[t] = libre or SERIES[len(mapa) % len(SERIES)]
+    # Si se quitó un activo, su color queda libre para el siguiente
+    for t in [k for k in mapa if k not in tickers]:
+        del mapa[t]
+
+
+def color_activo(ticker: str, tickers: list[str] | None = None) -> str:
+    mapa = st.session_state.get("_colores_activos", {})
+    if ticker in mapa:
+        return mapa[ticker]
+    if tickers and ticker in tickers:
         return SERIES[tickers.index(ticker) % len(SERIES)]
-    except ValueError:
-        return TINTA_3
+    return TINTA_3
+
+
+# Colores de ROLES (portafolios y referencias). No se usan para activos, así
+# nunca se confunde "Máximo Sharpe" con un activo del mismo color.
+ROL = {
+    "actual": "#0b0b0b",       # tu portafolio: tinta negra
+    "max_sharpe": "#eda100",   # dorado (estrella)
+    "min_var": "#1baf7a",      # aguamarina (diamante)
+    "iguales": "#c3c2b7",      # gris claro
+    "referencia": "#898781",   # benchmark / promedio / valor teórico
+}
 
 
 # ─────────────────────────── Formatos ───────────────────────────
@@ -311,7 +337,7 @@ def layout(titulo: str = "", height: int = 360, xaxis_title: str = "", yaxis_tit
         "paper_bgcolor": "white",
         "plot_bgcolor": "white",
         "height": height,
-        "margin": dict(l=56, r=20, t=56 if titulo else 24, b=44),
+        "margin": dict(l=56, r=20, t=48 if titulo else 20, b=(96 if xaxis_title else 70) if legend else 44),
         "font": {"family": "Inter, system-ui, sans-serif", "color": TINTA_2, "size": 12},
         "xaxis": {"title": {"text": xaxis_title, "font": {"size": 12, "color": TINTA_2}},
                   "gridcolor": GRILLA, "linecolor": EJE, "zerolinecolor": EJE,
@@ -320,7 +346,9 @@ def layout(titulo: str = "", height: int = 360, xaxis_title: str = "", yaxis_tit
                   "gridcolor": GRILLA, "linecolor": EJE, "zerolinecolor": EJE,
                   "tickfont": {"size": 11, "color": TINTA_3}},
         "showlegend": legend,
-        "legend": {"orientation": "h", "yanchor": "bottom", "y": 1.0, "xanchor": "right", "x": 1,
+        # Leyenda debajo del gráfico: nunca choca con títulos largos
+        "legend": {"orientation": "h", "yanchor": "top", "y": -0.2 if xaxis_title else -0.12,
+                   "xanchor": "left", "x": 0,
                    "font": {"size": 11, "color": TINTA_2}, "bgcolor": "rgba(0,0,0,0)"},
         "hoverlabel": {"bgcolor": "white", "bordercolor": GRILLA, "font": {"size": 12, "color": TINTA}},
         "hovermode": "closest",

@@ -62,34 +62,51 @@ class FixedIncomeService:
         return float(np.interp(plazo, self.plazos, self.tasas)) / 100
 
     # ───────────────────────── Bonos ─────────────────────────────────────────
+    # Notación: m = pagos por año (1 anual, 2 semestral, 4 trimestral, 12 mensual),
+    # n = vencimiento * m períodos, y = tasa anual nominal (capitalizable m veces).
+    # Cada período se descuenta a la tasa periódica y/m.
+    FRECUENCIAS = {1: "anual", 2: "semestral", 4: "trimestral", 12: "mensual"}
+
     @staticmethod
-    def _flujos(tasa_cupon: float, valor_nominal: float, vencimiento: int):
-        tiempos = np.arange(1, vencimiento + 1, dtype=float)
-        flujos = np.full(vencimiento, tasa_cupon * valor_nominal)
+    def _flujos(tasa_cupon: float, valor_nominal: float, vencimiento: float, frecuencia: int = 1):
+        n = max(1, int(round(vencimiento * frecuencia)))
+        k = np.arange(1, n + 1, dtype=float)                 # número de período
+        flujos = np.full(n, tasa_cupon * valor_nominal / frecuencia)
         flujos[-1] += valor_nominal
-        return tiempos, flujos
+        return k, flujos
 
     @classmethod
-    def precio(cls, tasa: float, tasa_cupon: float, valor_nominal: float, vencimiento: int) -> float:
-        t, f = cls._flujos(tasa_cupon, valor_nominal, vencimiento)
-        return float(np.sum(f / (1 + tasa) ** t))
+    def precio(cls, tasa: float, tasa_cupon: float, valor_nominal: float, vencimiento: float,
+               frecuencia: int = 1) -> float:
+        k, f = cls._flujos(tasa_cupon, valor_nominal, vencimiento, frecuencia)
+        return float(np.sum(f / (1 + tasa / frecuencia) ** k))
 
     def duracion_y_convexidad(self, tasa_cupon: float = 0.05, valor_nominal: float = 100,
-                              vencimiento: int = 10, tasa_descuento: float | None = None) -> dict:
+                              vencimiento: float = 10, tasa_descuento: float | None = None,
+                              frecuencia: int = 1) -> dict:
         """Si no se da `tasa_descuento` se usa la tasa de la curva al plazo del bono
         (antes se usaba siempre la de 30 años, lo que no tiene sentido para un bono a 2 años)."""
+        m = int(frecuencia)
         tasa = self.tasa_para_plazo(vencimiento) if tasa_descuento is None else float(tasa_descuento)
-        t, f = self._flujos(tasa_cupon, valor_nominal, vencimiento)
-        vp = f / (1 + tasa) ** t
+        k, f = self._flujos(tasa_cupon, valor_nominal, vencimiento, m)
+        yp = tasa / m                                            # tasa por período
+        vp = f / (1 + yp) ** k
         precio = vp.sum()
 
-        d_mac = float(np.sum(t * vp) / precio)                  # años
-        d_mod = d_mac / (1 + tasa)                              # % de cambio por 1.00 de tasa
-        convex = float(np.sum(t * (t + 1) * vp) / (precio * (1 + tasa) ** 2))
-        dv01 = d_mod * precio * 0.0001                          # $ por 1 pb
+        d_mac = float(np.sum((k / m) * vp) / precio)             # en años
+        d_mod = d_mac / (1 + yp)                                 # % de cambio por 1.00 de tasa anual
+        convex = float(np.sum(k * (k + 1) * vp) / (precio * (1 + yp) ** 2 * m ** 2))  # en años²
+        dv01 = d_mod * precio * 0.0001                           # $ por 1 pb
 
         return {
             "precio_bono": round(float(precio), 4),
+            "precio_pct_nominal": round(float(precio / valor_nominal * 100), 4),
+            "valor_nominal": valor_nominal,
+            "frecuencia": m,
+            "frecuencia_nombre": self.FRECUENCIAS.get(m, f"{m} veces al año"),
+            "cupon_por_pago": round(float(tasa_cupon * valor_nominal / m), 4),
+            "numero_pagos": int(len(k)),
+            "es_cupon_cero": tasa_cupon == 0,
             "duracion": round(d_mac, 4),               # compatibilidad: Macaulay
             "duracion_macaulay": round(d_mac, 4),
             "duracion_modificada": round(d_mod, 4),
@@ -97,13 +114,16 @@ class FixedIncomeService:
             "dv01": round(float(dv01), 4),
             "tasa_descuento": round(tasa, 6),
             "fuente_tasa": "curva FRED interpolada" if tasa_descuento is None else "ingresada por el usuario",
-            "cotiza": "a la par" if abs(precio - valor_nominal) < 0.01
+            "cotiza": "a la par" if abs(precio - valor_nominal) < 0.005 * valor_nominal / 100
                       else ("con prima" if precio > valor_nominal else "con descuento"),
+            "flujos": [{"periodo": int(kk), "anio": round(float(kk / m), 4), "flujo": round(float(ff), 4),
+                        "valor_presente": round(float(v), 4)} for kk, ff, v in zip(k, f, vp)],
         }
 
     def sensibilidad_shocks(self, tasa_cupon: float = 0.05, valor_nominal: float = 100,
-                            vencimiento: int = 10, tasa_descuento: float | None = None) -> list:
-        base = self.duracion_y_convexidad(tasa_cupon, valor_nominal, vencimiento, tasa_descuento)
+                            vencimiento: float = 10, tasa_descuento: float | None = None,
+                            frecuencia: int = 1) -> list:
+        base = self.duracion_y_convexidad(tasa_cupon, valor_nominal, vencimiento, tasa_descuento, frecuencia)
         p0, dm, cx, y0 = (base["precio_bono"], base["duracion_modificada"],
                           base["convexidad"], base["tasa_descuento"])
         resultados = []
@@ -111,7 +131,7 @@ class FixedIncomeService:
             dy = shock_bp / 10000
             p_lin = p0 * (1 - dm * dy)                          # 1er orden
             p_dc = p0 * (1 - dm * dy + 0.5 * cx * dy ** 2)      # 2do orden
-            p_ex = self.precio(y0 + dy, tasa_cupon, valor_nominal, vencimiento)
+            p_ex = self.precio(y0 + dy, tasa_cupon, valor_nominal, vencimiento, frecuencia)
             resultados.append({
                 "shock_bp": shock_bp,
                 "precio_lineal": round(p_lin, 4),

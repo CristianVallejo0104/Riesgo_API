@@ -94,7 +94,7 @@ def api_post(ep, body=None, timeout=120):
     return None
 
 
-@st.cache_data(ttl=900, show_spinner=False)
+@st.cache_data(ttl=3600, show_spinner=False, max_entries=2000)
 def _get_cacheado(ep: str, params_json: str, timeout: int):
     # Si hay error se lanza la excepción: st.cache_data NO guarda excepciones,
     # así un fallo temporal no queda "pegado" en la caché.
@@ -104,7 +104,9 @@ def _get_cacheado(ep: str, params_json: str, timeout: int):
 
 
 def fetch(ep, params=None, timeout=180, silencioso=False):
-    """GET con caché de 15 minutos. Devuelve None (y avisa) si algo falla."""
+    """GET con caché compartida de 1 hora (entre pestañas y usuarios).
+    La clave incluye endpoint + parámetros: si agregas un ticker, los resultados de
+    los demás activos se reutilizan y sólo se calcula lo nuevo."""
     try:
         return _get_cacheado(ep, json.dumps(params or {}, sort_keys=True, default=str), timeout)
     except requests.exceptions.ConnectionError:
@@ -124,14 +126,29 @@ def cached_get(endpoint: str, params_str: str = ""):
     return fetch(endpoint, json.loads(params_str) if params_str else None)
 
 
-def descargar_si_no_existe(ticker):
-    """Descarga precios si no existen en BD (maneja 404 silenciosamente)."""
+def descargar_o_actualizar(ticker):
+    """Asegura que el ticker tenga precios en la BD.
+    * Si no existe: descarga 3 años completos.
+    * Si existe pero su último precio tiene más de 1 día hábil: descarga SÓLO los días
+      que faltan (el backend continúa desde la última fecha guardada).
+    * Si está al día: no hace nada."""
     try:
         r = requests.get(f"{API}/precios/{urllib.parse.quote(ticker, safe='')}", timeout=30)
-        if r.status_code == 404 or (r.status_code == 200 and len(r.json()) == 0):
-            requests.post(f"{API}/precios/descargar/{urllib.parse.quote(ticker, safe='')}", timeout=120)
+        datos = r.json() if r.status_code == 200 else []
+        if datos:
+            ultimo = pd.to_datetime(max(d["fecha"] for d in datos)).normalize()
+            if ultimo >= pd.Timestamp.today().normalize() - pd.tseries.offsets.BDay(1):
+                return
+        requests.post(f"{API}/precios/descargar/{urllib.parse.quote(ticker, safe='')}", timeout=120)
     except Exception:  # noqa: BLE001
         pass
+
+
+@st.cache_resource(show_spinner=False)
+def registro_descargas() -> dict:
+    """Memoria compartida por todo el servidor: {ticker: fecha en que se revisó}.
+    Evita volver a consultar Yahoo Finance por un ticker ya revisado hoy."""
+    return {}
 
 
 def actualizar_precios(ticker):
@@ -275,10 +292,14 @@ with st.sidebar:
     with st.expander("💰 Monto y nivel de confianza", expanded=False):
         valor_portafolio = st.number_input("Valor del portafolio (USD)", min_value=100.0,
                                            max_value=100_000_000.0, value=100_000.0, step=1_000.0)
-        confianza_var = st.select_slider(
-            "Nivel de confianza del VaR", options=[0.90, 0.95, 0.975, 0.99], value=0.95,
-            format_func=lambda x: f"{x:.1%}".replace(".0%", "%"),
-            help="95 % significa: 'en 95 de cada 100 días la pérdida no debería superar el VaR'.")
+        confianza_var = st.slider(
+            "Nivel de confianza del VaR (%)", min_value=80.0, max_value=99.5, value=95.0, step=0.5,
+            format="%.1f%%",
+            help="95 % significa: 'en 95 de cada 100 días la pérdida no debería superar el VaR'. "
+                 "Más confianza = VaR más alto (más conservador).") / 100
+        st.caption(f"Valores habituales: 95 % (gestión interna), 99 % (Basilea, VaR), 97,5 % (Basilea III, CVaR). "
+                   f"Con {confianza_var:.1%}".replace(".0%", "%") +
+                   f" se espera superar el VaR ~{(1 - confianza_var) * 100:.1f} de cada 100 días.")
 
     with st.expander("⚖️ Pesos de cada activo", expanded=False):
         peso_igual = st.checkbox("Repartir en partes iguales", value=True)
@@ -313,6 +334,9 @@ with st.sidebar:
         with st.spinner("Actualizando precios..."):
             with ThreadPoolExecutor(max_workers=4) as ex:
                 list(ex.map(actualizar_precios, tickers + [benchmark]))
+            for t in tickers + [benchmark]:
+                registro_descargas()[t] = str(pd.Timestamp.today().date())
+        registro_descargas().clear()
         st.cache_data.clear()
         st.rerun()
 
@@ -324,16 +348,22 @@ fi, ff = str(fecha_inicio), str(fecha_fin)
 lista_pesos = [float(pesos.get(t, 0)) for t in tickers]
 P_BASE = {"tickers": tickers, "pesos": lista_pesos, "fecha_inicio": fi, "fecha_fin": ff}
 
-# ── Descarga inicial de datos (una vez por combinación de activos) ──
-if "descargados" not in st.session_state:
-    st.session_state["descargados"] = set()
-faltantes = [t for t in tickers + [benchmark] if t not in st.session_state["descargados"]]
+# ── Descarga incremental de datos ──
+# Sólo se consultan los tickers que nadie ha revisado hoy. Al agregar un ticker se
+# descarga únicamente ese; los demás conservan sus datos y sus cálculos en caché.
+_reg = registro_descargas()
+_hoy = str(pd.Timestamp.today().date())
+faltantes = [t for t in dict.fromkeys(tickers + [benchmark]) if _reg.get(t) != _hoy]
 if faltantes:
     with st.spinner(f"Preparando datos de {', '.join(faltantes)}..."):
         with ThreadPoolExecutor(max_workers=4) as ex:
-            list(ex.map(descargar_si_no_existe, faltantes))
-    st.session_state["descargados"].update(faltantes)
-    st.cache_data.clear()
+            list(ex.map(descargar_o_actualizar, faltantes))
+    for t in faltantes:
+        _reg[t] = _hoy
+    # Sólo se invalida la caché de precios de los tickers nuevos/actualizados
+
+# Colores estables: cada activo conserva su color aunque agregues o quites otros
+ui.registrar_colores(tickers)
 
 # ── Tasa libre de riesgo y datos macro (FRED) ──
 macro = fetch("/macro/", silencioso=True)
@@ -390,7 +420,11 @@ def est_dd(d):
     return "bueno" if d > -0.10 else "alerta" if d > -0.20 else "serio" if d > -0.35 else "critico"
 
 
-def est_var(v):  # v = pérdida diaria en fracción (positiva)
+def est_var(v):
+    """v = pérdida diaria (fracción positiva). Los umbrales están definidos para el 95 %;
+    con otro nivel de confianza se re-escala por z(95 %)/z(nivel) para que el color
+    refleje el riesgo del portafolio y no sólo el nivel de confianza elegido."""
+    v = v * sp_stats.norm.ppf(0.95) / sp_stats.norm.ppf(confianza_var)
     return "bueno" if v < 0.015 else "alerta" if v < 0.025 else "serio" if v < 0.04 else "critico"
 
 
@@ -590,7 +624,8 @@ def pagina_resumen():
         {"Indicador": "Máximo drawdown", "Qué mide": "La peor caída desde un máximo hasta un mínimo.",
          "Rangos de referencia": "> −10 % leve · −10 a −20 % moderada · −20 a −35 % fuerte · < −35 % severa."},
         {"Indicador": "VaR diario", "Qué mide": f"Pérdida que sólo se supera en {round((1 - confianza_var) * 100, 1)} % de los días.",
-         "Rangos de referencia": "< 1.5 % del capital bajo · 1.5–2.5 % medio · 2.5–4 % alto · > 4 % muy alto."},
+         "Rangos de referencia": "Al 95 %: < 1.5 % del capital bajo · 1.5–2.5 % medio · 2.5–4 % alto · > 4 % muy alto. "
+                                 "Con otro nivel de confianza los umbrales se ajustan proporcionalmente."},
         {"Indicador": "Beta", "Qué mide": "Sensibilidad a los movimientos del benchmark.",
          "Rangos de referencia": "< 0.8 defensivo · 0.8–1.2 se mueve como el mercado · > 1.2 agresivo. "
                                  "No es bueno ni malo: depende de tu tolerancia al riesgo."},
@@ -854,12 +889,12 @@ def pagina_volatilidad():
     if filas:
         dv = pd.DataFrame(filas)
         fig = go.Figure()
-        fig.add_trace(go.Bar(x=dv["Activo"], y=dv["Histórica"] * 100, name="Promedio del período", marker_color=ui.SERIES[0]))
-        fig.add_trace(go.Bar(x=dv["Activo"], y=dv["EWMA (hoy)"] * 100, name="Actual (EWMA)", marker_color=ui.SERIES[1]))
+        fig.add_trace(go.Bar(x=dv["Activo"], y=dv["Histórica"] * 100, name="Promedio del período", marker_color=ui.ROL["referencia"]))
+        fig.add_trace(go.Bar(x=dv["Activo"], y=dv["EWMA (hoy)"] * 100, name="Actual (EWMA)", marker_color=ui.AZUL))
         fig.update_layout(**ui.layout("¿Está cada activo más nervioso que su promedio?", 320,
                                       yaxis_title="Volatilidad anual (%)", barmode="group", barcornerradius=4))
         st.plotly_chart(fig, use_container_width=True)
-        st.caption("Si la barra naranja (hoy) es más alta que la azul (promedio), el activo atraviesa un período "
+        st.caption("Si la barra azul (hoy) es más alta que la gris (promedio), el activo atraviesa un período "
                    "más agitado de lo normal.")
 
     ui.encabezado("Modelos para un activo")
@@ -1309,10 +1344,12 @@ def pagina_markowitz():
     for tk in cols:
         fig.add_trace(go.Scatter(x=[activos.loc[tk, "riesgo"] * 100], y=[activos.loc[tk, "retorno"] * 100],
                                  mode="markers+text", text=[tk], textposition="middle right", showlegend=False,
-                                 marker=dict(color=ui.color_activo(tk, tickers), size=9, line=dict(color="white", width=2)),
+                                 marker=dict(color=ui.TINTA_3, size=8, line=dict(color="white", width=1.5)),
                                  hovertemplate=f"{tk}<br>Riesgo %{{x:.1f}}%<br>Rend. %{{y:.1f}}%<extra></extra>"))
-    for nombre, p, simb, col in [("Pesos iguales", ig, "square", ui.TINTA_3), ("Máximo Sharpe", ms, "star", ui.SERIES[3]),
-                                 ("Mínima varianza", mv, "diamond", ui.SERIES[2]), ("Tu portafolio", act, "circle", ui.SERIES[1])]:
+    for nombre, p, simb, col in [("Pesos iguales", ig, "square", ui.ROL["iguales"]),
+                                 ("Máximo Sharpe", ms, "star", ui.ROL["max_sharpe"]),
+                                 ("Mínima varianza", mv, "diamond", ui.ROL["min_var"]),
+                                 ("Tu portafolio", act, "circle", ui.ROL["actual"])]:
         fig.add_trace(go.Scatter(x=[p["riesgo_anual"] * 100], y=[p["retorno_anual"] * 100], mode="markers", name=nombre,
                                  marker=dict(symbol=simb, size=16 if simb == "star" else 12, color=col,
                                              line=dict(color="white", width=2)),
@@ -1329,7 +1366,8 @@ def pagina_markowitz():
                              "Mínima varianza": [mv["pesos"][t] for t in cols]})
         fig = go.Figure()
         for i, c in enumerate(["Tu portafolio", "Máximo Sharpe", "Mínima varianza"]):
-            fig.add_trace(go.Bar(x=comp["Activo"], y=comp[c] * 100, name=c, marker_color=[ui.SERIES[1], ui.SERIES[3], ui.SERIES[2]][i]))
+            fig.add_trace(go.Bar(x=comp["Activo"], y=comp[c] * 100, name=c,
+                                 marker_color=[ui.ROL["actual"], ui.ROL["max_sharpe"], ui.ROL["min_var"]][i]))
         fig.update_layout(**ui.layout("Pesos sugeridos vs tus pesos actuales", 360, yaxis_title="% del capital",
                                       barmode="group", barcornerradius=3))
         st.plotly_chart(fig, use_container_width=True)
@@ -1437,19 +1475,44 @@ def pagina_macro():
 
 # ─────────────────────────── RENTA FIJA ───────────────────────────
 def pagina_renta_fija():
-    cabecera("Renta fija — duración y convexidad",
-             "Cuando las tasas de interés suben, el precio de los bonos baja. La duración y la convexidad "
-             "miden cuánto. Aquí puedes valorar un bono con cupón anual y nominal de USD 100.")
+    cabecera("Renta fija — valoración de un bono, duración y convexidad",
+             "Un bono es un préstamo: entregas dinero hoy y recibes intereses (cupones) y tu capital al final. "
+             "Cuando las tasas de interés del mercado suben, el precio de los bonos baja. Aquí puedes armar "
+             "cualquier bono y ver cuánto vale y qué tan sensible es a las tasas.")
+    FREC = {1: "Anual (1 pago al año)", 2: "Semestral (2 pagos)", 4: "Trimestral (4 pagos)", 12: "Mensual (12 pagos)"}
     with st.container(border=True):
-        c1, c2, c3 = st.columns(3)
-        cupon = c1.number_input("Tasa cupón anual (%)", value=5.0, step=0.25, min_value=0.0, max_value=50.0) / 100
-        venc = int(c2.number_input("Años al vencimiento", value=10, min_value=1, max_value=50))
-        usar_curva = c3.toggle("Usar la tasa de mercado (curva FRED)", value=True,
-                               help="Interpola la curva del Tesoro al plazo del bono.")
+        st.markdown("**1. Características del bono**")
+        c1, c2, c3, c4 = st.columns(4)
+        tipo = c1.radio("Tipo de bono", ["Con cupones", "Cupón cero"], horizontal=True,
+                        help="Un bono cupón cero no paga intereses periódicos: se compra con descuento y "
+                             "al vencimiento devuelve el nominal completo.")
+        if tipo == "Cupón cero":
+            cupon = 0.0
+            c2.number_input("Tasa cupón anual (%)", value=0.0, disabled=True)
+            frec = 1
+            c3.selectbox("Frecuencia de pago", ["No aplica (un solo pago al final)"], disabled=True)
+        else:
+            cupon = c2.number_input("Tasa cupón anual (%)", value=5.0, step=0.25, min_value=0.01, max_value=50.0,
+                                    help="Interés anual que paga el bono sobre su nominal.") / 100
+            frec = c3.selectbox("Frecuencia de pago", list(FREC), index=1, format_func=FREC.get,
+                                help="Los bonos del Tesoro de EE. UU. y muchos corporativos pagan semestralmente.")
+        nominal = c4.number_input("Valor nominal (USD)", value=1000.0, min_value=1.0, max_value=1e9, step=100.0,
+                                  help="Lo que te devuelven al vencimiento. Suele ser 100 o 1.000.")
+
+        st.markdown("**2. Plazo y tasa de mercado**")
+        c5, c6, c7 = st.columns([1, 1, 1])
+        venc = int(c5.number_input("Años al vencimiento", value=10, min_value=1, max_value=50))
+        usar_curva = c6.toggle("Usar la tasa del mercado (curva del Tesoro, FRED)", value=True,
+                               help="Toma la tasa de la curva al mismo plazo del bono.")
         ytm = None
         if not usar_curva:
-            ytm = c3.number_input("Tasa de descuento / YTM (%)", value=4.5, step=0.25, min_value=-2.0, max_value=40.0) / 100
-    params = {"tasa_cupon": cupon, "vencimiento": venc}
+            ytm = c7.number_input("Rendimiento exigido / YTM anual (%)", value=4.5, step=0.25,
+                                  min_value=-2.0, max_value=40.0,
+                                  help="La tasa que exige el mercado hoy para este tipo de bono.") / 100
+        else:
+            c7.caption("Desactiva el interruptor para escribir tu propio rendimiento (YTM).")
+
+    params = {"tasa_cupon": cupon, "vencimiento": venc, "frecuencia": frec, "valor_nominal": nominal}
     if ytm is not None:
         params["tasa_descuento"] = ytm
     d = fetch("/renta-fija/duracion", params)
@@ -1457,66 +1520,107 @@ def pagina_renta_fija():
     if not d or not s:
         return
     y0 = d["tasa_descuento"]
+    p0, dm, cx = d["precio_bono"], d["duracion_modificada"], d["convexidad"]
+
     ui.kpi_grid([
-        {"label": "Precio del bono", "value": f"USD {d['precio_bono']:.2f}", "sub": f"Cotiza {d['cotiza']}",
-         "estado": "neutral", "tag": f"YTM {pct(y0)} · {d['fuente_tasa']}"},
+        {"label": "Precio justo del bono", "value": usd(p0, 2),
+         "sub": f"{d['precio_pct_nominal']:.2f} % del nominal", "estado": "neutral", "tag": f"Cotiza {d['cotiza']}"},
+        {"label": "Rendimiento usado (YTM)", "value": pct(y0), "sub": d["fuente_tasa"].replace("curva FRED", "Curva FRED").replace("ingresada", "Ingresada")},
+        {"label": "Pagos que recibirás", "value": f"{d['numero_pagos']}",
+         "sub": "Sólo el nominal al final" if d["es_cupon_cero"] else
+                f"{usd(d['cupon_por_pago'], 2)} cada pago ({d['frecuencia_nombre']})"},
         {"label": "Duración de Macaulay", "value": f"{d['duracion_macaulay']:.2f} años",
-         "sub": "Plazo promedio ponderado de los pagos"},
-        {"label": "Duración modificada", "value": f"{d['duracion_modificada']:.2f}",
-         "sub": f"Si la tasa sube 1 p.p., el precio cae ≈ {d['duracion_modificada']:.1f} %",
-         "estado": "bueno" if d["duracion_modificada"] < 3 else "alerta" if d["duracion_modificada"] < 7 else "serio"},
-        {"label": "Convexidad", "value": f"{d['convexidad']:.1f}", "sub": "Corrige la curvatura precio-tasa"},
-        {"label": "DV01", "value": f"USD {d['dv01']:.4f}", "sub": "Cambio de precio por 1 punto básico (0.01 %)"},
+         "sub": "Igual al plazo (cupón cero)" if d["es_cupon_cero"] else "Plazo promedio en que recuperas tu dinero"},
+        {"label": "Duración modificada", "value": f"{dm:.2f}",
+         "sub": f"Si la tasa sube 1 p.p., el precio cae ≈ {dm:.1f} %",
+         "estado": "bueno" if dm < 3 else "alerta" if dm < 7 else "serio",
+         "tag": "Sensibilidad baja" if dm < 3 else "Sensibilidad media" if dm < 7 else "Sensibilidad alta"},
+        {"label": "Convexidad", "value": f"{cx:.1f}", "sub": "Corrige la curvatura precio–tasa (mayor = mejor)"},
+        {"label": "DV01", "value": usd(d["dv01"], 4), "sub": "Cambio de precio por cada 0,01 % de tasa"},
     ])
 
-    def precio(y):
-        t = np.arange(1, venc + 1)
-        f = np.full(venc, cupon * 100.0)
-        f[-1] += 100
-        return float(np.sum(f / (1 + y) ** t))
+    sube = next(x for x in s["shocks"] if x["shock_bp"] == 100)
+    baja = next(x for x in s["shocks"] if x["shock_bp"] == -100)
+    ui.en_simple(
+        f"Hoy este bono vale {usd(p0, 2)}"
+        + (f", menos que su nominal de {usd(nominal, 0)}, porque no paga intereses: tu ganancia es la diferencia."
+           if d["es_cupon_cero"] else
+           f" ({d['cotiza']}: su cupón de {pct(cupon)} es {'mayor' if cupon > y0 else 'menor' if cupon < y0 else 'igual'} "
+           f"que la tasa de mercado de {pct(y0)}).")
+        + f" Si las tasas suben 1 punto porcentual, bajaría a {usd(sube['precio_exacto'], 2)} "
+        f"({sube['cambio_pct_exacto']:+.2f} %); si bajan 1 punto, subiría a {usd(baja['precio_exacto'], 2)} "
+        f"({baja['cambio_pct_exacto']:+.2f} %). Fíjate que gana más de lo que pierde: eso es la convexidad.")
 
-    ys = np.linspace(max(-0.005, y0 - 0.04), y0 + 0.04, 80)
-    p0, dm, cx = d["precio_bono"], d["duracion_modificada"], d["convexidad"]
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(x=ys * 100, y=[precio(y) for y in ys], name="Precio exacto", line=dict(color=ui.AZUL, width=3)))
-    fig.add_trace(go.Scatter(x=ys * 100, y=p0 * (1 - dm * (ys - y0)), name="Aproximación por duración",
-                             line=dict(color=ui.NARANJA, width=2, dash="dash")))
-    fig.add_trace(go.Scatter(x=ys * 100, y=p0 * (1 - dm * (ys - y0) + 0.5 * cx * (ys - y0) ** 2),
-                             name="Duración + convexidad", line=dict(color=ui.SERIES[2], width=2, dash="dot")))
-    fig.add_trace(go.Scatter(x=[y0 * 100], y=[p0], mode="markers", name="Hoy",
-                             marker=dict(color=ui.TINTA, size=10, line=dict(color="white", width=2))))
-    fig.update_layout(**ui.layout("Relación precio – tasa del bono", 400, xaxis_title="Tasa de mercado / YTM (%)",
-                                  yaxis_title="Precio (USD)"))
-    st.plotly_chart(fig, use_container_width=True)
+    def precio(y):
+        n = venc * frec
+        k = np.arange(1, n + 1)
+        f = np.full(n, cupon * nominal / frec)
+        f[-1] += nominal
+        return float(np.sum(f / (1 + y / frec) ** k))
+
+    c1, c2 = st.columns([1.3, 1])
+    with c1:
+        ys = np.linspace(max(-0.005, y0 - 0.04), y0 + 0.04, 80)
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=ys * 100, y=[precio(y) for y in ys], name="Precio exacto",
+                                 line=dict(color=ui.AZUL, width=3)))
+        fig.add_trace(go.Scatter(x=ys * 100, y=p0 * (1 - dm * (ys - y0)), name="Aproximación sólo con duración",
+                                 line=dict(color=ui.NARANJA, width=2, dash="dash")))
+        fig.add_trace(go.Scatter(x=ys * 100, y=p0 * (1 - dm * (ys - y0) + 0.5 * cx * (ys - y0) ** 2),
+                                 name="Duración + convexidad", line=dict(color=ui.SERIES[2], width=2, dash="dot")))
+        fig.add_trace(go.Scatter(x=[y0 * 100], y=[p0], mode="markers", name="Hoy",
+                                 marker=dict(color=ui.ROL["actual"], size=10, line=dict(color="white", width=2))))
+        fig.update_layout(**ui.layout("Si cambia la tasa de mercado, ¿cuánto vale el bono?", 400,
+                                      xaxis_title="Tasa de mercado / YTM (%)", yaxis_title="Precio (USD)",
+                                      hovermode="x unified"))
+        st.plotly_chart(fig, use_container_width=True)
+    with c2:
+        fl = pd.DataFrame(d["flujos"])
+        fig = go.Figure()
+        fig.add_trace(go.Bar(x=fl["anio"], y=fl["flujo"], name="Pago recibido", marker_color=ui.ROL["referencia"]))
+        fig.add_trace(go.Bar(x=fl["anio"], y=fl["valor_presente"], name="Lo que vale hoy (valor presente)",
+                             marker_color=ui.AZUL))
+        fig.add_vline(x=d["duracion_macaulay"], line_dash="dash", line_color=ui.ROL["actual"],
+                      annotation_text="Duración", annotation_position="top left")
+        fig.update_layout(**ui.layout("Calendario de pagos del bono", 400, xaxis_title="Año",
+                                      yaxis_title="USD", barmode="overlay"))
+        fig.update_traces(opacity=0.85, selector=dict(type="bar"))
+        st.plotly_chart(fig, use_container_width=True)
+        st.caption("La línea punteada (duración) es el 'centro de gravedad' de los pagos: el momento promedio en "
+                   "que recuperas tu dinero, ponderado por lo que vale cada pago hoy.")
 
     sh = pd.DataFrame(s["shocks"])
     tabla = sh[["shock_bp", "precio_exacto", "cambio_pct_exacto", "precio_lineal", "precio_duracion_convexidad",
                 "error_lineal", "error_duracion_convexidad"]]
-    tabla.columns = ["Choque (pb)", "Precio exacto", "Cambio %", "Aprox. duración", "Aprox. dur.+convex.",
-                     "Error duración", "Error dur.+convex."]
-    st.dataframe(tabla.style.format({"Precio exacto": "{:.2f}", "Cambio %": "{:+.2f}%", "Aprox. duración": "{:.2f}",
-                                     "Aprox. dur.+convex.": "{:.2f}", "Error duración": "{:+.3f}",
-                                     "Error dur.+convex.": "{:+.3f}"}), use_container_width=True, hide_index=True)
-    sube = sh[sh["shock_bp"] == 100].iloc[0]
-    ui.en_simple(f"Si las tasas suben 1 punto porcentual (100 pb), este bono pasaría de USD {p0:.2f} a "
-                 f"USD {sube['precio_exacto']:.2f} ({sube['cambio_pct_exacto']:+.2f} %). La convexidad hace que "
-                 "las caídas de precio por subidas de tasas sean un poco menores que lo que predice la duración sola.")
+    tabla.columns = ["Cambio de tasa (pb)", "Precio exacto", "Cambio %", "Estimado con duración",
+                     "Estimado con dur. + convexidad", "Error duración", "Error dur. + convexidad"]
+    st.markdown("**¿Qué pasa con el precio si las tasas cambian?** (100 pb = 1 punto porcentual)")
+    st.dataframe(tabla.style.format({"Precio exacto": "{:,.2f}", "Cambio %": "{:+.2f}%",
+                                     "Estimado con duración": "{:,.2f}", "Estimado con dur. + convexidad": "{:,.2f}",
+                                     "Error duración": "{:+.3f}", "Error dur. + convexidad": "{:+.3f}"}),
+                 use_container_width=True, hide_index=True)
+    st.caption("La columna de error muestra cuánto se equivoca cada aproximación frente al precio exacto: la de "
+               "duración + convexidad casi siempre acierta mucho mejor, sobre todo en cambios grandes.")
 
     ui.guia_lectura("Cómo leer las métricas de un bono", [
-        {"Concepto": "Precio a la par / con prima / con descuento", "Qué es": "Precio = 100, > 100 o < 100.",
-         "Cómo leerlo": "Si el cupón es mayor que la tasa de mercado, el bono vale más de 100 (prima), y viceversa."},
-        {"Concepto": "YTM (rendimiento al vencimiento)", "Qué es": "La tasa que iguala el valor presente de los pagos con el precio.",
-         "Cómo leerlo": "Es el rendimiento anual que obtienes si compras hoy y mantienes hasta el final."},
-        {"Concepto": "Duración de Macaulay", "Qué es": "Tiempo promedio (en años) en que recibes tu dinero.",
-         "Cómo leerlo": "Siempre ≤ al vencimiento. Un bono cupón cero tiene duración = vencimiento."},
-        {"Concepto": "Duración modificada", "Qué es": "% que cambia el precio si la tasa cambia 1 p.p.",
-         "Cómo leerlo": "< 3 baja sensibilidad · 3–7 media · > 7 alta (bonos largos, muy sensibles a las tasas)."},
-        {"Concepto": "Convexidad", "Qué es": "Curvatura de la relación precio-tasa.",
-         "Cómo leerlo": "Mayor convexidad = mejor para el inversionista: gana más si bajan tasas y pierde menos si suben."},
-        {"Concepto": "DV01", "Qué es": "Cambio en USD del precio por un movimiento de 0.01 % en la tasa.",
-         "Cómo leerlo": "Usado por los operadores para medir y cubrir el riesgo de tasa."},
-        {"Concepto": "Punto básico (pb)", "Qué es": "0.01 %. 100 pb = 1 punto porcentual.",
-         "Cómo leerlo": "+200 pb es un choque fuerte de tasas, como el de 2022."},
+        {"Concepto": "Nominal", "Qué es": "El monto que te devuelven al vencimiento (también llamado valor facial o par).",
+         "Cómo leerlo": "Los cupones se calculan sobre él: cupón 5 % con nominal 1.000 = 50 USD al año."},
+        {"Concepto": "Frecuencia del cupón", "Qué es": "Cuántas veces al año se pagan intereses.",
+         "Cómo leerlo": "Semestral con cupón 5 % y nominal 1.000 = dos pagos de 25 USD al año. Más pagos = recuperas antes = menor duración."},
+        {"Concepto": "Bono cupón cero", "Qué es": "No paga intereses: se compra barato y paga el nominal al final.",
+         "Cómo leerlo": "Su duración es igual al plazo; es el bono más sensible a las tasas para un plazo dado."},
+        {"Concepto": "A la par / con prima / con descuento", "Qué es": "Precio igual, mayor o menor que el nominal.",
+         "Cómo leerlo": "Cupón > tasa de mercado → con prima. Cupón < tasa → con descuento. Iguales → a la par."},
+        {"Concepto": "YTM (rendimiento al vencimiento)", "Qué es": "La tasa anual que hace que el valor presente de los pagos sea igual al precio.",
+         "Cómo leerlo": "Es lo que ganas por año si compras hoy y mantienes hasta el final, reinvirtiendo los cupones a esa tasa."},
+        {"Concepto": "Duración de Macaulay", "Qué es": "Tiempo promedio, en años, en que recibes tu dinero.",
+         "Cómo leerlo": "Siempre ≤ plazo. Un bono a 10 años con cupones puede tener duración de ~8 años."},
+        {"Concepto": "Duración modificada", "Qué es": "% que cambia el precio si la tasa cambia 1 punto porcentual.",
+         "Cómo leerlo": ("alerta", "< 3 baja · 3–7 media · > 7 alta sensibilidad a las tasas")},
+        {"Concepto": "Convexidad", "Qué es": "Curvatura de la relación precio–tasa.",
+         "Cómo leerlo": "Más convexidad es mejor para quien tiene el bono: gana más cuando bajan las tasas de lo que pierde cuando suben."},
+        {"Concepto": "DV01", "Qué es": "Cambio en USD del precio por un movimiento de 0,01 % (1 pb) en la tasa.",
+         "Cómo leerlo": "Lo usan los operadores para medir y cubrir el riesgo de tasa de interés."},
     ], columnas=("Concepto", "Qué es", "Cómo leerlo"))
 
 
@@ -1689,15 +1793,11 @@ def pagina_ml():
     if not requiere_portafolio(1):
         return
     ui.hero('Machine Learning — dirección del precio', 'Compara Random Forest, XGBoost y Regresión Logística para estimar si el precio subirá o bajará mañana. Una exactitud cercana a 50 % equivale a lanzar una moneda.', eyebrow='Herramientas')
-    st.markdown("""
-    El módulo de ML entrena y compara automáticamente **3 modelos de clasificación** 
-    (Random Forest, XGBoost y Logistic Regression) para predecir si el precio de un 
-    activo **subirá o bajará** al día siguiente.
-    El sistema usa los **retornos logarítmicos de los últimos 5 días** como features 
-    y selecciona automáticamente el modelo con mejor accuracy. Los hiperparámetros se 
-    optimizan con **GridSearchCV** y el modelo se reentrenan automáticamente **cada 8 días**.
-    """)
-    st.divider()
+    ui.en_simple("El sistema mira cómo se movió el precio en los últimos 5 días y aprende de miles de casos "
+                 "pasados para estimar si mañana subirá o bajará. Prueba 3 modelos (Random Forest, XGBoost y "
+                 "Regresión Logística), elige el que más acierta y se reentrena solo cada 8 días. "
+                 "Los mercados son muy difíciles de predecir: acertar 55 % de las veces ya se considera bueno.",
+                 "Cómo funciona")
 
     # ── SECCIÓN 1: CONTROLES ──
     with st.container(border=True):
@@ -1889,6 +1989,19 @@ def pagina_ml():
             st.warning(f"⚖️ **Portafolio neutral** — señales mixtas.")
 
         st.info("⚠️ **Importante:** predicciones basadas en ML con datos históricos. No constituyen asesoramiento financiero.")
+
+    ui.guia_lectura("Cómo leer los resultados del modelo", [
+        {"Indicador": "Accuracy (exactitud)", "Qué mide": "% de días en que el modelo acertó si subía o bajaba.",
+         "Cómo leerlo": ("alerta", "≈ 50 % igual que lanzar una moneda · 52–55 % modesto · > 55 % bueno · > 65 % sospechoso (posible sobreajuste)")},
+        {"Indicador": "Precisión", "Qué mide": "De las veces que dijo 'sube', cuántas realmente subió.",
+         "Cómo leerlo": "Alta precisión = pocas falsas alarmas de subida."},
+        {"Indicador": "Recall (sensibilidad)", "Qué mide": "De los días que realmente subió, cuántos detectó.",
+         "Cómo leerlo": "Alto recall = se le escapan pocas subidas."},
+        {"Indicador": "Probabilidad de la predicción", "Qué mide": "Qué tan seguro está el modelo de su señal.",
+         "Cómo leerlo": "50–55 % confianza baja · 55–70 % media · > 70 % alta. Cerca de 50 % = el modelo no sabe."},
+        {"Indicador": "Reentrenamiento", "Qué mide": "Si el modelo se actualizó con los datos recientes.",
+         "Cómo leerlo": "Los patrones del mercado cambian; un modelo viejo pierde validez."},
+    ], columnas=("Indicador", "Qué mide", "Cómo leerlo"))
 
 
 

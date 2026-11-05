@@ -46,6 +46,13 @@ def calcular_nelson_siegel():
 
 _TASA_DESC = Query(default=None, ge=-0.05, le=0.50,
                    description="YTM en decimal. Si se omite se interpola la curva de FRED al plazo del bono.")
+_FRECUENCIA = Query(default=1, description="Pagos de cupón por año: 1, 2, 4 o 12")
+_NOMINAL = Query(default=100.0, gt=0, le=1e9, description="Valor nominal (lo que se devuelve al vencimiento)")
+
+
+def _validar_frecuencia(frecuencia: int):
+    if frecuencia not in (1, 2, 4, 12):
+        raise HTTPException(status_code=422, detail="La frecuencia debe ser 1, 2, 4 o 12 pagos por año.")
 
 
 @router.get("/duracion")
@@ -53,11 +60,15 @@ def calcular_duracion(
     tasa_cupon: float = Query(default=0.05, ge=-0.50, le=1.0, description="Tasa cupón anual"),
     vencimiento: int = Query(default=10, ge=1, le=100, description="Años al vencimiento (mínimo 1)"),
     tasa_descuento: float | None = _TASA_DESC,
+    frecuencia: int = _FRECUENCIA,
+    valor_nominal: float = _NOMINAL,
 ):
+    _validar_frecuencia(frecuencia)
     datos = MacroService().curva_rendimiento()
     servicio = FixedIncomeService(datos["plazos"], datos["tasas"])
-    return servicio.duracion_y_convexidad(tasa_cupon=tasa_cupon, vencimiento=vencimiento,
-                                          tasa_descuento=tasa_descuento)
+    return servicio.duracion_y_convexidad(tasa_cupon=tasa_cupon, valor_nominal=valor_nominal,
+                                          vencimiento=vencimiento, tasa_descuento=tasa_descuento,
+                                          frecuencia=frecuencia)
 
 
 @router.get("/curva")
@@ -74,12 +85,15 @@ def sensibilidad_bono(
     tasa_cupon: float = Query(default=0.05, ge=-0.50, le=1.0, description="Tasa cupón anual"),
     vencimiento: int = Query(default=10, ge=1, le=100, description="Años al vencimiento (mínimo 1)"),
     tasa_descuento: float | None = _TASA_DESC,
+    frecuencia: int = _FRECUENCIA,
+    valor_nominal: float = _NOMINAL,
 ):
+    _validar_frecuencia(frecuencia)
     datos = MacroService().curva_rendimiento()
     servicio = FixedIncomeService(datos["plazos"], datos["tasas"])
-    base = servicio.duracion_y_convexidad(tasa_cupon, 100, vencimiento, tasa_descuento)
+    base = servicio.duracion_y_convexidad(tasa_cupon, valor_nominal, vencimiento, tasa_descuento, frecuencia)
     return {
         "precio_base": base["precio_bono"],
         "tasa_descuento": base["tasa_descuento"],
-        "shocks": servicio.sensibilidad_shocks(tasa_cupon, 100, vencimiento, tasa_descuento),
+        "shocks": servicio.sensibilidad_shocks(tasa_cupon, valor_nominal, vencimiento, tasa_descuento, frecuencia),
     }

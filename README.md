@@ -337,6 +337,25 @@ personas sin formación en finanzas o estadística. Se puede abrir un módulo di
 | Instrumentos | Opciones | Black-Scholes, griegas call/put, paridad put-call, volatilidad implícita |
 | Herramientas | ML · Agente IA · Arquitectura · Glosario | Predicción de dirección, informe con LLM local, flujo técnico, términos |
 
+### Parámetros que puedes cambiar
+
+| Dónde | Parámetro | Opciones |
+|---|---|---|
+| Barra lateral → 💰 | Valor del portafolio | USD 100 a USD 100 millones |
+| Barra lateral → 💰 | Nivel de confianza del VaR | Libre entre 80 % y 99,5 % (pasos de 0,5 %) |
+| Barra lateral → ⚖️ | Pesos | Iguales o personalizados (se re-escalan a 100 %) |
+| Barra lateral → 📅 | Período | Hasta 3 años |
+| Renta fija | Tipo de bono | Con cupones o **cupón cero** |
+| Renta fija | Cupón, frecuencia y nominal | Anual, semestral, trimestral o mensual; nominal libre |
+| Renta fija | Rendimiento (YTM) | Curva del Tesoro (FRED) al plazo del bono o tasa propia |
+
+### Velocidad y caché
+
+* Cada endpoint se guarda en caché **1 hora** según sus parámetros, y la caché se comparte entre pestañas y usuarios.
+  Al agregar un ticker solo se calcula lo nuevo: los resultados de los demás activos se reutilizan.
+* Los precios se revisan **una vez al día por ticker**. Si un ticker ya tiene datos, solo se descargan los días que faltan.
+* El botón **🔄 Actualizar precios** fuerza la descarga y limpia la caché.
+
 ### Correcciones de teoría de riesgo (v2.1)
 
 | Tema | Antes | Ahora (y por qué) |

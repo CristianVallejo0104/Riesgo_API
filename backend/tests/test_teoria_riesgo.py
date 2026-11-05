@@ -166,6 +166,41 @@ def test_bono_a_la_par_y_duracion():
     assert r["duracion_modificada"] == pytest.approx(8.1078 / 1.05, abs=1e-3)
 
 
+@pytest.mark.parametrize("m", [1, 2, 4, 12])
+def test_cupon_cero_duracion_igual_al_vencimiento(m):
+    fi = FixedIncomeService([1, 30], [5, 5])
+    r = fi.duracion_y_convexidad(tasa_cupon=0.0, valor_nominal=1000, vencimiento=7,
+                                 tasa_descuento=0.06, frecuencia=m)
+    assert r["duracion_macaulay"] == pytest.approx(7, abs=1e-9)
+    assert r["precio_bono"] == pytest.approx(1000 / (1 + 0.06 / m) ** (7 * m), abs=1e-3)
+    assert r["es_cupon_cero"]
+
+
+@pytest.mark.parametrize("m", [1, 2, 4, 12])
+def test_bono_a_la_par_con_cualquier_frecuencia_y_nominal(m):
+    fi = FixedIncomeService([1, 30], [5, 5])
+    r = fi.duracion_y_convexidad(tasa_cupon=0.08, valor_nominal=5000, vencimiento=5,
+                                 tasa_descuento=0.08, frecuencia=m)
+    assert r["precio_bono"] == pytest.approx(5000, abs=1e-6)
+    assert r["numero_pagos"] == 5 * m
+    assert r["cupon_por_pago"] == pytest.approx(400 / m, abs=1e-4)
+
+
+def test_mas_pagos_por_anio_reduce_duracion():
+    fi = FixedIncomeService([1, 30], [5, 5])
+    d1 = fi.duracion_y_convexidad(0.06, 100, 10, 0.05, 1)["duracion_macaulay"]
+    d2 = fi.duracion_y_convexidad(0.06, 100, 10, 0.05, 2)["duracion_macaulay"]
+    assert d2 < d1  # se recibe dinero antes -> menor plazo promedio
+
+
+def test_convexidad_semestral_mejora_aproximacion():
+    fi = FixedIncomeService([1, 30], [5, 5])
+    for s in fi.sensibilidad_shocks(0.05, 100, 10, 0.05, 2):
+        if s["shock_bp"] != 0:
+            assert abs(s["error_duracion_convexidad"]) <= abs(s["error_lineal"])
+            assert abs(s["error_duracion_convexidad"]) < 0.25
+
+
 def test_bono_usa_tasa_del_plazo_correcto():
     fi = FixedIncomeService([0.25, 2, 10, 30], [5.0, 4.0, 4.5, 4.8])
     assert fi.duracion_y_convexidad(vencimiento=2)["tasa_descuento"] == pytest.approx(0.04)
