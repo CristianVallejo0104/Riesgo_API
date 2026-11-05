@@ -135,6 +135,7 @@ def test_var_portafolio_diversificacion_y_euler():
     v = s.var_portafolio(np.ones(3) / 3, 0.95)
     # El VaR del portafolio es menos severo que la suma de VaR individuales (subaditividad)
     assert v["var_parametrico_portafolio"] >= v["suma_var_individuales"]
+    assert v["beneficio_diversificacion"] >= 0
     # Las contribuciones de Euler suman el VaR total
     total = sum(c["var_componente"] for c in v["contribucion_por_activo"])
     assert total == pytest.approx(v["var_parametrico_portafolio"], rel=1e-3)

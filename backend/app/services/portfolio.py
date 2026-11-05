@@ -180,7 +180,8 @@ class PortfolioService:
             "cvar_historico_portafolio": round(cvar_hist, 6),
             "cvar_parametrico_portafolio": round(float(cvar_param), 6),
             "suma_var_individuales": round(suma_indiv, 6),
-            "beneficio_diversificacion": round(suma_indiv - var_param, 6),
+            # VaR expresados como rendimientos negativos: el del portafolio es menos negativo
+            "beneficio_diversificacion": round(var_param - suma_indiv, 6),
             "volatilidad_anual_portafolio": round(sigma_p * np.sqrt(DIAS_ANIO), 4),
             "retorno_anual_esperado": round(mu_p * DIAS_ANIO, 4),
             "contribucion_por_activo": [

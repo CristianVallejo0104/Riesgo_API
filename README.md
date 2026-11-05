@@ -316,8 +316,51 @@ Riesgo_API/
 
 ## 📊 Módulos del Dashboard
 
-| Tab | Módulo | Descripción |
+El tablero se navega desde la barra lateral (sección → módulo). Sólo se calcula la página abierta,
+por eso carga rápido. Cada módulo trae KPIs con **semáforo**, un recuadro **"En palabras simples"** y una
+tabla **📘 "Cómo leer"** con el significado y los rangos de referencia de cada resultado, pensada para
+personas sin formación en finanzas o estadística. Se puede abrir un módulo directo con `?pagina=var`.
+
+| Sección | Módulo | Pregunta que responde |
 |---|---|---|
+| Empezar | Inicio y guía de uso | ¿Cómo uso el tablero y qué significa cada color? |
+| Empezar | Resumen ejecutivo | ¿Cómo va mi portafolio? (rentabilidad, volatilidad, Sharpe, drawdown, VaR/CVaR en USD, beta) |
+| Mercado | Precios y señales técnicas | Velas, medias, Bollinger, RSI (Wilder), MACD, estocástico y semáforo técnico |
+| Mercado | Rendimientos y distribución | ¿Hay colas pesadas? Histograma, Q-Q, Jarque-Bera, Shapiro-Wilk |
+| Mercado | Volatilidad | EWMA y 6 modelos GARCH/GJR/EGARCH con pronóstico, persistencia, vida media y ARCH-LM |
+| Riesgo | VaR y CVaR | 4 métodos de VaR, CVaR, VaR por componentes, diversificación y backtesting de Kupiec |
+| Riesgo | Pruebas de estrés | Choques de mercado vía beta, volatilidad ×2, correlaciones → 1 y peores ventanas reales |
+| Riesgo | CAPM | Beta, alfa de Jensen con p-value, SML, riesgo sistemático vs idiosincrático |
+| Portafolio | Markowitz | Frontera eficiente, máximo Sharpe (tangente), mínima varianza vs tu portafolio |
+| Portafolio | Benchmark y macro | Tracking error, information ratio, curva del Tesoro (Nelson-Siegel), inflación |
+| Instrumentos | Renta fija | Precio, duración Macaulay/modificada, convexidad, DV01, choques de tasas |
+| Instrumentos | Opciones | Black-Scholes, griegas call/put, paridad put-call, volatilidad implícita |
+| Herramientas | ML · Agente IA · Arquitectura · Glosario | Predicción de dirección, informe con LLM local, flujo técnico, términos |
+
+### Correcciones de teoría de riesgo (v2.1)
+
+| Tema | Antes | Ahora (y por qué) |
+|---|---|---|
+| Máximo Sharpe | El portafolio mostrado como "Máx. Sharpe" era el de **mínima varianza** y el Sharpe ignoraba la tasa libre de riesgo | Se resuelve el portafolio tangente real con `(μ − rf)/σ`; la frontera sólo dibuja la rama eficiente |
+| Nivel de confianza | El VaR individual ignoraba el slider (siempre 95 %) | Todos los endpoints de VaR reciben `nivel` y `horizonte` |
+| VaR Monte Carlo | Simulaba una normal → repetía el VaR paramétrico con ruido | t de Student ajustada por MV (captura colas pesadas), con semilla fija |
+| CVaR del portafolio | `VaR × 1.3` | CVaR histórico y paramétrico reales |
+| Pesos | VaR, stress y benchmark usaban pesos iguales y tickers fijos | Usan los activos y pesos elegidos por el usuario |
+| Agregación | Rendimientos log promediados entre activos | Rendimientos **simples** para portafolios (el log no es aditivo entre activos) |
+| Kupiec | Backtesting dentro de muestra (tautológico); fallaba con 0 excepciones | Ventana móvil fuera de muestra + zonas tipo Basilea |
+| Curtosis | Se comparaba la curtosis en exceso de pandas contra 3 | Se compara contra 0 (normal) |
+| GARCH | Método duplicado, test ARCH-LM falso (`normaltest`), persistencia α+β para EGARCH/GJR | Persistencia correcta por modelo, ARCH-LM de Engle, pronóstico, vol. de largo plazo y vida media |
+| CAPM | Alfa con medias de log-rendimientos sin regresión de excesos | Regresión `(Ri − rf) = α + β(Rm − rf)`, p-values y descomposición del riesgo |
+| Stress test | Impactos fijos (−10 % por tasas a todos, −16 % "combinado") y beta contra el propio portafolio | Beta contra el benchmark, VaR estresado, correlaciones → 1 y peores ventanas observadas |
+| Renta fija | Todo bono se descontaba con la tasa a 30 años; el gráfico usaba duración Macaulay como modificada | Tasa interpolada al plazo (o YTM del usuario), duración modificada, DV01 |
+| Opciones | Theta anual sólo call, vega por 1.00 de σ, vol. implícita con Newton (puede divergir) | Griegas call/put en unidades interpretables (día, 1 p.p.), Brent con límites de no arbitraje |
+| Benchmark | Drawdown con `(1 + r_log).cumprod()` y Sharpe sin rf | Rendimientos simples y Sharpe con la tasa de FRED |
+
+Las pruebas `backend/tests/test_teoria_riesgo.py` y `test_endpoints_analisis.py` verifican estas
+propiedades (CVaR ≤ VaR, subaditividad, contribuciones de Euler que suman el VaR, Black-Scholes contra
+valores de referencia, paridad put-call, bono a la par, etc.).
+
+---|---|---|
 | 0 | Contexto | Arquitectura + inicialización del portafolio |
 | 1 | Técnico | Velas japonesas, SMA, EMA, Bollinger, RSI, MACD, Estocástico |
 | 2 | Rendimientos | Propiedades empíricas, histograma, Q-Q Plot, pruebas de normalidad |
