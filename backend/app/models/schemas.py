@@ -34,7 +34,7 @@ class PriceResponse(BaseModel):
 class PortfolioCreate(BaseModel):
     nombre: str = Field(..., min_length=1, max_length=100)
     descripcion: Optional[str] = None
-    tickers: list[str] = Field(..., min_legth=1, description="Lista de tickers en el portafolio")
+    tickers: list[str] = Field(..., min_length=1, description="Lista de tickers en el portafolio")
     pesos: dict[str, float] = Field(...)
 
     @field_validator("pesos")
@@ -97,31 +97,45 @@ class GreeksResponse(BaseModel):
     delta_put: float
     gamma: float
     theta_call: float
+    theta_put: Optional[float] = None
     vega: float
     rho_call: float
+    rho_put: Optional[float] = None
 
 
 class OptionResponse(BaseModel):
     parametros: dict
     precios: dict
     greeks: GreeksResponse
-    
 
 
 # ── VaR ───────────────────────────────────────────────────────────────────────
 class KupiecResult(BaseModel):
-    excepciones: int
-    n: int
-    p_value: float
-    aprobado: bool
+    disponible: bool = True
+    motivo: Optional[str] = None
+    ventana: Optional[int] = None
+    excepciones: Optional[int] = None
+    excepciones_esperadas: Optional[float] = None
+    n: Optional[int] = None
+    p_esperado: Optional[float] = None
+    p_observado: Optional[float] = None
+    estadistico_lr: Optional[float] = None
+    p_value: Optional[float] = None
+    aprobado: Optional[bool] = None
+    zona: Optional[str] = None
 
 
 class VaRResponse(BaseModel):
     ticker: str
+    nivel_confianza: Optional[float] = None
+    horizonte_dias: Optional[int] = None
     var_parametrico: float
+    var_cornish_fisher: Optional[float] = None
     var_historico: float
     var_montecarlo: float
     cvar: float
+    cvar_parametrico: Optional[float] = None
+    volatilidad_anual: Optional[float] = None
     kupiec: Optional[KupiecResult] = None
 
 
@@ -138,7 +152,22 @@ class FronteraPoint(BaseModel):
     riesgo: float
 
 
+class ActivoFrontera(BaseModel):
+    ticker: str
+    retorno: float
+    riesgo: float
+    sharpe: float
+
+
 class MarkowitzResponse(BaseModel):
     tickers: list[str]
+    tasa_libre_riesgo: Optional[float] = None
     optimizacion: PortfolioOptResult
+    maximo_sharpe: Optional[PortfolioOptResult] = None
+    minima_varianza: Optional[PortfolioOptResult] = None
+    portafolio_actual: Optional[PortfolioOptResult] = None
+    pesos_iguales: Optional[PortfolioOptResult] = None
+    activos: list[ActivoFrontera] = []
+    correlacion: Optional[dict] = None
     frontera: list[FronteraPoint]
+    n_observaciones: Optional[int] = None

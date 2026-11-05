@@ -33,6 +33,8 @@ def obtener_precios(ticker: str, db: DBSession):
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Activo {ticker} no registrado",
         )
-    precios = db.scalars(select(Price).where(Price.asset_id == asset.id)).all()
+    precios = db.scalars(
+        select(Price).where(Price.asset_id == asset.id).order_by(Price.fecha)
+    ).all()
     return precios
 

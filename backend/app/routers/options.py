@@ -44,6 +44,11 @@ def calcular_vol_implicita(
 
     servicio = OptionsService(S, K, T, r, 0.2)
     vol = servicio.volatilidad_implicita(precio_mercado, tipo)
+    if vol is None:
+        raise HTTPException(
+            status_code=422,
+            detail="El precio de mercado viola los límites de no arbitraje "
+                   "(es menor que el valor intrínseco descontado o mayor que el máximo posible).")
     return {
         "volatilidad_implicita": vol,
         "precio_mercado": precio_mercado,

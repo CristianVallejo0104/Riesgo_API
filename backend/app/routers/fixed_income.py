@@ -40,66 +40,46 @@ class BondParams(BaseModel):
 
 @router.get("/nelson-siegel")
 def calcular_nelson_siegel():
-    plazos = [0.25, 1, 2, 5, 10, 30]
-    tasas = [4.5, 4.2, 4.0, 3.8, 3.9, 4.1]
-    servicio = FixedIncomeService(plazos, tasas)
-    return servicio.ajustar_nelson_siegel()
+    datos = MacroService().curva_rendimiento()
+    return FixedIncomeService(datos["plazos"], datos["tasas"]).ajustar_nelson_siegel()
+
+
+_TASA_DESC = Query(default=None, ge=-0.05, le=0.50,
+                   description="YTM en decimal. Si se omite se interpola la curva de FRED al plazo del bono.")
 
 
 @router.get("/duracion")
 def calcular_duracion(
-    tasa_cupon: float = Query(default=0.05, ge=-0.50, le=1.0,
-                              description="Tasa cupón anual"),
-    vencimiento: int = Query(default=10, ge=1, le=100,
-                             description="Años al vencimiento (mínimo 1)")
+    tasa_cupon: float = Query(default=0.05, ge=-0.50, le=1.0, description="Tasa cupón anual"),
+    vencimiento: int = Query(default=10, ge=1, le=100, description="Años al vencimiento (mínimo 1)"),
+    tasa_descuento: float | None = _TASA_DESC,
 ):
-    if vencimiento <= 0:
-        raise HTTPException(
-            status_code=422,
-            detail="El vencimiento debe ser mayor a 0 años."
-        )
-    macro = MacroService()
-    datos = macro.curva_rendimiento()
+    datos = MacroService().curva_rendimiento()
     servicio = FixedIncomeService(datos["plazos"], datos["tasas"])
-    return servicio.duracion_y_convexidad(
-        tasa_cupon=tasa_cupon,
-        vencimiento=vencimiento
-    )
+    return servicio.duracion_y_convexidad(tasa_cupon=tasa_cupon, vencimiento=vencimiento,
+                                          tasa_descuento=tasa_descuento)
 
 
 @router.get("/curva")
 def obtener_curva():
-    macro = MacroService()
-    datos = macro.curva_rendimiento()
+    datos = MacroService().curva_rendimiento()
     if not datos["plazos"]:
-        raise HTTPException(
-            status_code=503,
-            detail="No se pudieron obtener datos de FRED"
-        )
+        raise HTTPException(status_code=503, detail="No se pudieron obtener datos de FRED")
     servicio = FixedIncomeService(datos["plazos"], datos["tasas"])
-    return {
-        "datos_mercado": datos,
-        "nelson_siegel": servicio.ajustar_nelson_siegel(),
-    }
+    return {"datos_mercado": datos, "nelson_siegel": servicio.ajustar_nelson_siegel()}
 
 
 @router.get("/sensibilidad")
 def sensibilidad_bono(
-    tasa_cupon: float = Query(default=0.05, ge=-0.50, le=1.0,
-                              description="Tasa cupón anual"),
-    vencimiento: int = Query(default=10, ge=1, le=100,
-                             description="Años al vencimiento (mínimo 1)")
+    tasa_cupon: float = Query(default=0.05, ge=-0.50, le=1.0, description="Tasa cupón anual"),
+    vencimiento: int = Query(default=10, ge=1, le=100, description="Años al vencimiento (mínimo 1)"),
+    tasa_descuento: float | None = _TASA_DESC,
 ):
-    if vencimiento <= 0:
-        raise HTTPException(
-            status_code=422,
-            detail="El vencimiento debe ser mayor a 0 años."
-        )
-    macro = MacroService()
-    datos = macro.curva_rendimiento()
+    datos = MacroService().curva_rendimiento()
     servicio = FixedIncomeService(datos["plazos"], datos["tasas"])
+    base = servicio.duracion_y_convexidad(tasa_cupon, 100, vencimiento, tasa_descuento)
     return {
-        "precio_base": servicio.duracion_y_convexidad(
-            tasa_cupon, 100, vencimiento)["precio_bono"],
-        "shocks": servicio.sensibilidad_shocks(tasa_cupon, 100, vencimiento)
+        "precio_base": base["precio_bono"],
+        "tasa_descuento": base["tasa_descuento"],
+        "shocks": servicio.sensibilidad_shocks(tasa_cupon, 100, vencimiento, tasa_descuento),
     }

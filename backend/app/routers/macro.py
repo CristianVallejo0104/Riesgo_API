@@ -1,6 +1,6 @@
 import numpy as np
 import pandas as pd
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from sqlalchemy import select
 
 from app.dependencies import DBSession
@@ -24,57 +24,54 @@ def obtener_macro(db: DBSession):
 
 
 @router.get("/benchmark")
-def metricas_benchmark(db: DBSession, benchmark: str = "^GSPC"):
-    servicio = DataService(db)
-    tickers = settings.default_tickers
+def metricas_benchmark(db: DBSession, benchmark: str = "^GSPC",
+                       tickers: list[str] = Query(default=None),
+                       pesos: list[float] = Query(default=None),
+                       fecha_inicio: str = Query(default=None),
+                       fecha_fin: str = Query(default=None)):
+    """Desempeño relativo del portafolio frente al benchmark.
+    Se usan rendimientos SIMPLES: el rendimiento del portafolio es el promedio
+    ponderado de los rendimientos simples (con log-rendimientos eso no se cumple)."""
+    # Import local para evitar import circular
+    from app.routers.analisis import _rendimientos_df, _vector_pesos, _max_drawdown, _rend_benchmark
 
-    precios_bench = servicio.descargar_precios(benchmark)
-    if not precios_bench:
+    tickers = tickers or settings.default_tickers
+    servicio = DataService(db)
+    try:
+        servicio.descargar_precios(benchmark)
+    except Exception:
+        pass
+    rb = _rend_benchmark(benchmark, db, fecha_inicio, fecha_fin)
+    if rb is None:
         raise HTTPException(status_code=404, detail=f"No hay datos para {benchmark}")
 
-    df_bench = pd.DataFrame([{"fecha": p.fecha, "close": p.close} for p in precios_bench])
-    df_bench.set_index("fecha", inplace=True)
-    ret_bench = np.log(df_bench["close"] / df_bench["close"].shift(1)).dropna()
+    df_rend = _rendimientos_df(tickers, db, fecha_inicio, fecha_fin, tipo="simple")
+    w = _vector_pesos(list(df_rend.columns), tickers, pesos)
+    rp = pd.Series(df_rend.values @ w, index=df_rend.index)
 
-    pesos = {t: 1/len(tickers) for t in tickers}
-    ret_port = pd.Series(dtype=float)
-
-    for ticker in tickers:
-        precios = servicio.descargar_precios(ticker)
-        if precios:
-            df_t = pd.DataFrame([{"fecha": p.fecha, "close": p.close} for p in precios])
-            df_t.set_index("fecha", inplace=True)
-            ret_t = np.log(df_t["close"] / df_t["close"].shift(1)).dropna()
-            if ret_port.empty:
-                ret_port = ret_t * pesos[ticker]
-            else:
-                comunes = ret_port.index.intersection(ret_t.index)
-                ret_port = ret_port.loc[comunes] + ret_t.loc[comunes] * pesos[ticker]
-
-    comunes = ret_port.index.intersection(ret_bench.index)
-    rp = ret_port.loc[comunes]
-    rb = ret_bench.loc[comunes]
+    datos = pd.concat([rp.rename("p"), rb.rename("m")], axis=1).dropna()
+    rp, rb = datos["p"], datos["m"]
 
     exceso = rp - rb
     tracking_error = float(exceso.std() * np.sqrt(252))
-    information_ratio = float(exceso.mean() * 252 / tracking_error) if tracking_error > 0 else 0
-
-    # Max Drawdown del portafolio
-    cum = (1 + rp).cumprod()
-    rolling_max = cum.cummax()
-    drawdown = (cum - rolling_max) / rolling_max
-    max_drawdown = float(drawdown.min())
-
-    # Rendimiento acumulado base 100
-    ret_acum_port = float((1 + rp).prod() - 1)
-    ret_acum_bench = float((1 + rb).prod() - 1)
+    information_ratio = float(exceso.mean() * 252 / tracking_error) if tracking_error > 0 else 0.0
+    max_dd, _, _ = _max_drawdown(rp)
+    max_dd_bench, _, _ = _max_drawdown(rb)
+    rf = MacroService().tasa_libre_riesgo()
+    vol_p = float(rp.std() * np.sqrt(252))
 
     return {
         "benchmark": benchmark,
+        "tickers": list(df_rend.columns),
         "tracking_error": round(tracking_error, 4),
         "information_ratio": round(information_ratio, 4),
-        "max_drawdown": round(max_drawdown, 4),
-        "retorno_acumulado_portafolio": round(ret_acum_port, 4),
-        "retorno_acumulado_benchmark": round(ret_acum_bench, 4),
-        "sharpe_portafolio": round(float(rp.mean() * 252 / (rp.std() * np.sqrt(252))), 4),
+        "max_drawdown": round(max_dd, 4),
+        "max_drawdown_benchmark": round(max_dd_bench, 4),
+        "retorno_acumulado_portafolio": round(float((1 + rp).prod() - 1), 4),
+        "retorno_acumulado_benchmark": round(float((1 + rb).prod() - 1), 4),
+        "beta_portafolio": round(float(rp.cov(rb) / rb.var()), 4) if rb.var() > 0 else None,
+        "correlacion": round(float(rp.corr(rb)), 4),
+        "tasa_libre_riesgo": rf,
+        "sharpe_portafolio": round((float(rp.mean() * 252) - rf) / vol_p, 4) if vol_p > 0 else 0.0,
+        "sharpe_benchmark": round((float(rb.mean() * 252) - rf) / float(rb.std() * np.sqrt(252)), 4),
     }

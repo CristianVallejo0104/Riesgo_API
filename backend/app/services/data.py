@@ -124,11 +124,13 @@ class TechnicalIndicators:
     def rsi(self, period: int = None) -> pd.Series:
         if period is None:
             period = settings.rsi_period
+        # Suavizado de Wilder (media exponencial con alpha = 1/period), que es la
+        # definición original del RSI y la que usan las plataformas de trading.
         delta = self.close.diff()
-        gain = delta.where(delta > 0, 0).rolling(window=period).mean()
-        loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
-        rs = gain / loss
-        return 100 - (100 / (1 + rs))
+        gain = delta.clip(lower=0).ewm(alpha=1 / period, min_periods=period, adjust=False).mean()
+        loss = (-delta.clip(upper=0)).ewm(alpha=1 / period, min_periods=period, adjust=False).mean()
+        rs = gain / loss.replace(0, np.nan)
+        return (100 - (100 / (1 + rs))).fillna(100.0).where(gain.notna())
 
     def macd(self) -> dict:
         ema_fast = self.close.ewm(span=settings.macd_fast).mean()
@@ -154,7 +156,8 @@ class TechnicalIndicators:
     def stochastic(self) -> dict:
         low_min = self.low.rolling(window=settings.stochastic_k_period).min()
         high_max = self.high.rolling(window=settings.stochastic_k_period).max()
-        k = 100 * (self.close - low_min) / (high_max - low_min)
+        rango = (high_max - low_min).replace(0, np.nan)
+        k = 100 * (self.close - low_min) / rango
         d = k.rolling(window=settings.stochastic_d_period).mean()
         return {"k": k, "d": d}
 

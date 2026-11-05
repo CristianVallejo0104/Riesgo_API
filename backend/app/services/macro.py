@@ -77,6 +77,8 @@ class MacroService:
         return data
 
     def inflacion(self) -> float:
+        if not self.api_key:
+            return FALLBACKS["inflacion"]
         try:
             r = requests.get(FRED_BASE, params={
                 "series_id": "CPIAUCSL",
