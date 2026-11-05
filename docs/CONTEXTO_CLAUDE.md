@@ -188,6 +188,90 @@ streamlit run frontend/app.py
 
 ---
 
+## 3b. Probarlo en Ubuntu (terminal)
+
+**Requisito previo — versión de Python:** el proyecto fija `numpy==1.26.4` y `pandas==2.2.2`, que **no tienen
+paquetes para Python 3.13**. Usa **Python 3.12**, la misma versión del CI. Ubuntu 24.04 ya trae 3.12;
+en Ubuntu 24.10, 25.04 o superior instálalo con `uv`, como se indica abajo.
+
+```bash
+# 1. Herramientas del sistema (una sola vez)
+sudo apt update
+sudo apt install -y git python3-venv python3-pip curl
+python3 --version
+```
+- `apt update` refresca la lista de paquetes; `apt install` instala git, el módulo de entornos virtuales y pip.
+- `python3 --version` debe decir 3.12.x. Si dice 3.13 o más, usa la opción con `uv` del paso 3.
+
+```bash
+# 2. Clonar (o actualizar) el repositorio
+git clone https://github.com/CristianVallejo0104/Riesgo_API.git   # solo la primera vez
+cd Riesgo_API
+git checkout main
+git pull
+```
+
+```bash
+# 3a. Entorno virtual con Python 3.12 del sistema
+python3 -m venv .venv
+source .venv/bin/activate
+pip install --upgrade pip
+pip install -r backend/requirements.txt
+
+# 3b. (Alternativa si tu Ubuntu trae Python 3.13+)
+curl -LsSf https://astral.sh/uv/install.sh | sh
+source ~/.local/bin/env
+uv venv --python 3.12 .venv
+source .venv/bin/activate
+uv pip install -r backend/requirements.txt
+```
+- `source .venv/bin/activate` activa el entorno; el prompt de la terminal mostrará `(.venv)`. Hay que activarlo en cada terminal nueva.
+- `uv` descarga Python 3.12 sin tocar el Python del sistema.
+
+```bash
+# 4. Variables de entorno (opcional pero recomendado: tasas reales de FRED)
+cp backend/.env.example backend/.env
+nano backend/.env        # escribe FRED_API_KEY=tu_clave  (gratis en fred.stlouisfed.org)
+```
+
+```bash
+# 5. Pruebas (deben pasar las 46)
+cd backend && python -m pytest tests -q && cd ..
+```
+
+```bash
+# 6a. Levantar todo con un solo comando (API + tablero)
+chmod +x start.sh
+./start.sh
+# Abre http://localhost:8501   (API en http://localhost:8000/docs)
+
+# 6b. O en dos terminales (útil para ver errores de cada parte)
+# Terminal 1:
+source .venv/bin/activate && cd backend && uvicorn app.main:app --reload --port 8000
+# Terminal 2:
+source .venv/bin/activate && streamlit run frontend/app.py
+```
+- `start.sh` arranca FastAPI en segundo plano, espera a que responda `/health` y luego abre Streamlit.
+- Para detenerlo: `Ctrl + C`. Si un puerto queda ocupado: `fuser -k 8000/tcp` o `fuser -k 8501/tcp`.
+
+```bash
+# 7. (Opcional) Agente IA local con Ollama
+curl -fsSL https://ollama.com/install.sh | sh
+ollama pull llama3
+ollama serve      # si no quedó corriendo como servicio
+```
+
+**Problemas comunes en Ubuntu**
+| Síntoma | Causa | Solución |
+|---|---|---|
+| `error: externally-managed-environment` | Usaste pip fuera del entorno virtual | Activa `.venv` (`source .venv/bin/activate`) |
+| Falla instalando numpy/pandas | Python 3.13+ | Usa la opción 3b con `uv` (Python 3.12) |
+| "Backend no disponible" en el tablero | La API no está corriendo | Levanta la terminal 1 o usa `./start.sh` |
+| Un ticker `.CL` no trae datos | Yahoo cambió el símbolo | Corrígelo en `TICKERS_DB` de `frontend/app.py` |
+| Tasas en "valor de respaldo" | Falta `FRED_API_KEY` | Agrégala en `backend/.env` y reinicia la API |
+
+---
+
 ## 4. Ramas: qué se hizo y cómo deshacerlo si hace falta
 
 - El código nuevo **ya está en `main`**. Se hizo un *fast-forward*: `main` avanzó a los commits nuevos sin crear commits extra.
@@ -204,7 +288,7 @@ streamlit run frontend/app.py
 
 ---
 
-## 5. Prompt para Claude Desktop / Claude Code
+## 5. Prompt para Claude Desktop / Claude Code (Windows)
 
 Copia y pega esto al abrir el proyecto en tu PC:
 
@@ -233,4 +317,40 @@ Quiero que:
 3. Me ayudes a seguir mejorando el proyecto sobre main, explicando la teoría de riesgo detrás de cada cambio.
 
 Explícame el porqué de cada paso y los comandos línea por línea. Responde en español latinoamericano neutro, sin voseo.
+```
+
+### Prompt para Ubuntu
+
+```text
+Estoy en Ubuntu y trabajo en mi proyecto RiskLab USTA (FastAPI + Streamlit), un sistema de análisis de riesgo
+financiero para la universidad. Repositorio: https://github.com/CristianVallejo0104/Riesgo_API
+- Rama main = versión nueva (v2.1), la principal.
+- Rama version-original = código inicial (commit 770ec14), solo como respaldo.
+
+Lee primero docs/CONTEXTO_CLAUDE.md (secciones 2 y 3b): ahí está la teoría de cada cálculo y los pasos para Ubuntu.
+Resumen del proyecto:
+- Backend (backend/app/services): VaR paramétrico, Cornish-Fisher, histórico y Monte Carlo t-Student; CVaR;
+  backtesting de Kupiec fuera de muestra; EWMA y 6 modelos GARCH por AIC con test ARCH-LM; CAPM con regresión
+  de excesos; Markowitz con máximo Sharpe real (cvxpy) y ventas en corto; VaR de portafolio con contribuciones
+  de Euler; stress test por betas, volatilidad, correlaciones y peores ventanas; bonos con frecuencia, nominal y
+  cupón cero; Black-Scholes con griegas call/put; tasa libre de riesgo de EE. UU. o Colombia (FRED).
+- Frontend (frontend/app.py + frontend/ui.py): 16 páginas con semáforos, "En palabras simples" y tablas
+  "Cómo leer"; colores estables por activo; caché incremental; selector de mercado EE. UU. (USD) / Colombia (COP).
+- Pruebas: backend/tests (46 pruebas, con propiedades teóricas en test_teoria_riesgo.py).
+- Importante: requirements.txt fija numpy 1.26.4 y pandas 2.2.2, que necesitan Python 3.12 (no 3.13).
+
+Quiero que, paso a paso:
+1. Revises mi versión de Ubuntu y de Python (lsb_release -a, python3 --version) y me digas si uso el Python
+   del sistema o uv con Python 3.12.
+2. Me ayudes a crear el entorno virtual, instalar dependencias, configurar backend/.env con FRED_API_KEY,
+   correr las 46 pruebas y levantar la app con ./start.sh (o en dos terminales).
+3. Verifiquemos con datos reales de Yahoo Finance la lista de la sección 3: monto y confianza del VaR,
+   agregar un ticker (solo debe descargar ese), ventas en corto en Markowitz, cupón cero y frecuencias en
+   renta fija, y el mercado Colombia.
+4. Compruebes que los tickers colombianos (.CL) y el benchmark ^COLCAP / ICOLCAP.CL tengan datos en Yahoo; si
+   alguno no existe, corrige TICKERS_DB y BENCHMARKS_CO en frontend/app.py, corre las pruebas y haz commit en main.
+5. Revises que el CI de GitHub Actions haya pasado en main y, si falló, lo corrijamos.
+
+Explícame el porqué de cada paso y los comandos línea por línea. Si algo falla, muéstrame el error completo
+antes de proponer el arreglo. Responde en español latinoamericano neutro, sin voseo.
 ```
