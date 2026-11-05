@@ -1298,17 +1298,68 @@ def pagina_markowitz():
              "mejores combinaciones posibles: el mayor rendimiento esperado para cada nivel de riesgo.")
     if not requiere_portafolio():
         return
-    c1, c2 = st.columns([1, 2])
-    with c1:
-        cortos = st.toggle("Permitir ventas en corto", value=False,
-                           help="Vender en corto = apostar a que un activo baja. Se limita a −20 % por activo.")
-    with c2:
-        st.caption("Sin cortos, cada peso está entre 0 % y 100 %. Con cortos, entre −20 % y 120 %.")
-    d = fetch("/analisis/markowitz", {**P_BASE, "permitir_cortos": cortos, "rf": tasa_fred})
+    with st.container(border=True):
+        c1, c2 = st.columns([1, 2.2])
+        with c1:
+            cortos = st.toggle("Permitir ventas en corto", value=False, key="mk_cortos",
+                               help="Vender en corto = apostar a que un activo baja. Se limita a −20 % por activo.")
+            st.caption("Sin cortos: cada peso entre 0 % y 100 %.  \nCon cortos: entre −20 % y 120 %.")
+        with c2:
+            st.markdown(
+                "**¿Qué es vender en corto?** Es pedir prestadas acciones que no tienes, venderlas hoy y "
+                "recomprarlas después para devolverlas. **Ganas si el precio baja** y pierdes si sube. "
+                "*Ejemplo:* pides prestada 1 acción a USD 100 y la vendes; si baja a USD 80, la recompras, "
+                "la devuelves y te quedas con USD 20. En un portafolio, el dinero de esa venta se usa para "
+                "comprar más de otros activos, por eso un peso puede ser negativo (−20 %) y otro mayor a 100 %.")
+
+    # Se piden ambas versiones (quedan en caché) para poder compararlas
+    d_sin = fetch("/analisis/markowitz", {**P_BASE, "permitir_cortos": False, "rf": tasa_fred})
+    d_con = fetch("/analisis/markowitz", {**P_BASE, "permitir_cortos": True, "rf": tasa_fred}, silencioso=True) if cortos else None
+    d = d_con if (cortos and d_con) else d_sin
     if not d:
         return
 
     ms, mv, act, ig = d["maximo_sharpe"], d["minima_varianza"], d["portafolio_actual"], d["pesos_iguales"]
+
+    if cortos and d_con:
+        ms0, mv0 = d_sin["maximo_sharpe"], d_sin["minima_varianza"]
+        cortas = {t: w for t, w in ms["pesos"].items() if w < -0.001}
+        largas = {t: w for t, w in ms["pesos"].items() if w > 0.001}
+        bruta = sum(abs(w) for w in ms["pesos"].values())
+        ui.encabezado("¿Qué cambió al permitir ventas en corto?",
+                      "Comparación del portafolio de máximo Sharpe y de mínima varianza, con y sin cortos.")
+        ui.kpi_grid([
+            {"label": "Sharpe máximo", "value": f"{ms0['sharpe_ratio']:.2f} → {ms['sharpe_ratio']:.2f}",
+             "sub": f"Cambio: {ms['sharpe_ratio'] - ms0['sharpe_ratio']:+.2f}",
+             "estado": "bueno" if ms["sharpe_ratio"] > ms0["sharpe_ratio"] + 0.01 else "neutral",
+             "tag": "Mejora" if ms["sharpe_ratio"] > ms0["sharpe_ratio"] + 0.01 else "Sin mejora relevante"},
+            {"label": "Rendimiento (máx. Sharpe)", "value": f"{pct(ms0['retorno_anual'], 1)} → {pct(ms['retorno_anual'], 1)}",
+             "sub": f"Riesgo {pct(ms0['riesgo_anual'], 1)} → {pct(ms['riesgo_anual'], 1)}"},
+            {"label": "Riesgo mínimo posible", "value": f"{pct(mv0['riesgo_anual'], 1)} → {pct(mv['riesgo_anual'], 1)}",
+             "sub": "Mínima varianza sin → con cortos",
+             "estado": "bueno" if mv["riesgo_anual"] < mv0["riesgo_anual"] - 0.0005 else "neutral"},
+            {"label": "Exposición bruta", "value": pct(bruta, 0),
+             "sub": "Suma de posiciones largas + cortas (100 % = sin apalancamiento)",
+             "estado": "alerta" if bruta > 1.2 else "neutral"},
+        ])
+        if cortas:
+            txt_c = ", ".join(f"**{t}** ({usd(abs(w) * valor_portafolio)})" for t, w in cortas.items())
+            txt_l = ", ".join(f"**{t}** ({pct(w, 0)})" for t, w in sorted(largas.items(), key=lambda x: -x[1]))
+            ui.en_simple(
+                f"El portafolio de máximo Sharpe ahora **vende en corto** {txt_c}: el modelo apuesta a que esos "
+                f"activos rendirán relativamente menos. Con ese dinero compra más de {txt_l}. "
+                f"Así, por cada USD 100 de tu capital tienes posiciones por USD {bruta * 100:,.0f} en total, "
+                "lo que amplifica tanto las ganancias como las pérdidas.", "Interpretación")
+        else:
+            ui.en_simple("Aun pudiendo vender en corto, el portafolio óptimo **no lo hace**: ningún activo "
+                         "es tan poco atractivo como para que convenga apostar en su contra. Por eso los resultados "
+                         "son casi iguales a los de sin cortos.", "Interpretación")
+        ui.nota("Vender en corto tiene riesgos que el modelo no ve: la pérdida es teóricamente **ilimitada** "
+                "(el precio puede subir sin techo), hay que pagar intereses por las acciones prestadas, el bróker "
+                "puede exigir más garantía (margin call) y en muchos países o fondos está restringido.", "warn",
+                "Riesgos de las ventas en corto")
+        ui.encabezado("Resultados con ventas en corto")
+
     ui.kpi_grid([
         {"label": "⭐ Máximo Sharpe — rendimiento", "value": pct(ms["retorno_anual"]),
          "sub": f"Riesgo {pct(ms['riesgo_anual'])} · Sharpe {ms['sharpe_ratio']:.2f}", "estado": est_sharpe(ms["sharpe_ratio"])},
@@ -1335,7 +1386,13 @@ def pagina_markowitz():
     fig.add_trace(go.Scatter(x=nube_s * 100, y=nube_r * 100, mode="markers", name="Portafolios posibles (sin cortos)",
                              marker=dict(color=ui.SECUENCIAL[0][1], size=4, opacity=0.6), hoverinfo="skip"))
     fr = pd.DataFrame(d["frontera"]).sort_values("riesgo")
-    fig.add_trace(go.Scatter(x=fr["riesgo"] * 100, y=fr["retorno"] * 100, mode="lines", name="Frontera eficiente",
+    if cortos and d_con:
+        fr0 = pd.DataFrame(d_sin["frontera"]).sort_values("riesgo")
+        fig.add_trace(go.Scatter(x=fr0["riesgo"] * 100, y=fr0["retorno"] * 100, mode="lines",
+                                 name="Frontera SIN cortos", line=dict(color=ui.ROL["referencia"], width=2, dash="dash"),
+                                 hovertemplate="Riesgo %{x:.1f}%<br>Rend. %{y:.1f}%<extra>Sin cortos</extra>"))
+    fig.add_trace(go.Scatter(x=fr["riesgo"] * 100, y=fr["retorno"] * 100, mode="lines",
+                             name="Frontera CON cortos" if cortos and d_con else "Frontera eficiente",
                              line=dict(color=ui.AZUL, width=3),
                              hovertemplate="Riesgo %{x:.1f}%<br>Rend. %{y:.1f}%<extra>Frontera</extra>"))
     xs = np.linspace(0, max(fr["riesgo"].max(), activos["riesgo"].max()) * 1.02, 20)
@@ -1357,6 +1414,12 @@ def pagina_markowitz():
     fig.update_layout(**ui.layout("Mapa riesgo – rendimiento", 520, xaxis_title="Riesgo: volatilidad anual (%)",
                                   yaxis_title="Rendimiento esperado anual (%)"))
     st.plotly_chart(fig, use_container_width=True)
+    if cortos and d_con:
+        st.caption("La frontera azul (con cortos) queda por encima o igual que la gris (sin cortos): tener más "
+                   "libertad nunca empeora el óptimo. La distancia entre ambas es el beneficio teórico de poder "
+                   "vender en corto. La nube de puntos corresponde a combinaciones sin cortos.")
+    else:
+        st.caption("Activa **Permitir ventas en corto** arriba para ver cómo se expande la frontera.")
 
     c1, c2 = st.columns([1.3, 1])
     with c1:
@@ -1368,6 +1431,10 @@ def pagina_markowitz():
         for i, c in enumerate(["Tu portafolio", "Máximo Sharpe", "Mínima varianza"]):
             fig.add_trace(go.Bar(x=comp["Activo"], y=comp[c] * 100, name=c,
                                  marker_color=[ui.ROL["actual"], ui.ROL["max_sharpe"], ui.ROL["min_var"]][i]))
+        fig.add_hline(y=0, line_color=ui.EJE, line_width=1)
+        if (comp[["Máximo Sharpe", "Mínima varianza"]] < -0.001).any().any():
+            fig.add_annotation(text="Barras bajo 0 = venta en corto", xref="paper", yref="paper", x=0, y=0,
+                               showarrow=False, font=dict(size=11, color=ui.TINTA_2), xanchor="left", yanchor="bottom")
         fig.update_layout(**ui.layout("Pesos sugeridos vs tus pesos actuales", 360, yaxis_title="% del capital",
                                       barmode="group", barcornerradius=3))
         st.plotly_chart(fig, use_container_width=True)
@@ -1381,7 +1448,9 @@ def pagina_markowitz():
 
     elegido = st.radio("Ver la distribución en dinero de:", ["Máximo Sharpe", "Mínima varianza"], horizontal=True)
     pe = ms if elegido == "Máximo Sharpe" else mv
-    dist = pd.DataFrame([{"Activo": t, "Peso sugerido": w, "Monto (USD)": w * valor_portafolio,
+    dist = pd.DataFrame([{"Activo": t,
+                          "Posición": "▼ Venta en corto" if w < -0.001 else "▲ Compra (larga)" if w > 0.001 else "— Sin posición",
+                          "Peso sugerido": w, "Monto (USD)": w * valor_portafolio,
                           "Peso actual": act["pesos"][t], "Cambio (USD)": (w - act["pesos"][t]) * valor_portafolio}
                          for t, w in pe["pesos"].items()])
     st.dataframe(dist.style.format({"Peso sugerido": "{:.1%}", "Monto (USD)": "USD {:,.0f}", "Peso actual": "{:.1%}",
@@ -1401,6 +1470,12 @@ def pagina_markowitz():
          "Cómo leerlo": "Es donde la línea punteada (que parte de la tasa libre de riesgo) toca la frontera."},
         {"Elemento": "📍 Tu portafolio", "Qué representa": "Tus pesos actuales de la barra lateral.",
          "Cómo leerlo": "Cuanto más lejos esté por debajo de la frontera, más margen de mejora tienes."},
+        {"Elemento": "Venta en corto", "Qué representa": "Vender un activo prestado para recomprarlo más barato.",
+         "Cómo leerlo": "Peso negativo (ej. −20 %) = vendes en corto el 20 % de tu capital en ese activo; ganas si baja."},
+        {"Elemento": "Frontera con vs sin cortos", "Qué representa": "Lo mejor que se puede lograr con y sin esa libertad.",
+         "Cómo leerlo": "Si casi coinciden, los cortos no aportan. Si la azul queda muy arriba, el modelo encuentra activos para apostar en contra."},
+        {"Elemento": "Exposición bruta", "Qué representa": "Suma de todas las posiciones en valor absoluto.",
+         "Cómo leerlo": "100 % = sin apalancamiento. 140 % = por cada USD 100 tienes USD 140 invertidos: más riesgo real que el que muestra el modelo."},
         {"Elemento": "Correlación (ρ)", "Qué representa": "Qué tanto se mueven juntos dos activos (−1 a 1).",
          "Cómo leerlo": "Cerca de 1 (azul intenso): no diversifican · cerca de 0: diversifican · negativa (rojo): se compensan."},
     ], columnas=("Elemento", "Qué representa", "Cómo leerlo"))
