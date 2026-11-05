@@ -349,6 +349,19 @@ personas sin formación en finanzas o estadística. Se puede abrir un módulo di
 | Renta fija | Cupón, frecuencia y nominal | Anual, semestral, trimestral o mensual; nominal libre |
 | Renta fija | Rendimiento (YTM) | Curva del Tesoro (FRED) al plazo del bono o tasa propia |
 
+### Invertir en Colombia 🇨🇴
+
+En la barra lateral, **¿Dónde quieres invertir?** permite elegir entre Estados Unidos (USD) y Colombia (COP).
+Al elegir Colombia:
+* Se carga un portafolio de ejemplo con acciones de la BVC (`ECOPETROL.CL`, `PFBCOLOM.CL`, `ISA.CL`, `GEB.CL`, …).
+  Yahoo Finance usa el sufijo `.CL`. También hay ADR en USD (`EC`, `CIB`, `AVAL`) y el ETF `GXG`.
+* El benchmark sugerido es `ICOLCAP.CL` (ETF que replica el COLCAP). También se puede elegir `^COLCAP` o
+  escribir cualquier índice con la opción "Otro".
+* La tasa libre de riesgo se toma de FRED (`COLIR3TIB01STM`, interbancaria a 3 meses) o se escribe a mano.
+* Los montos se muestran en COP. Si mezclas activos en COP y USD, aparece un aviso: el modelo no incluye el riesgo cambiario.
+
+> Resumen completo, teoría, pasos para probar y para fusionar a `main`: [`docs/CONTEXTO_CLAUDE.md`](docs/CONTEXTO_CLAUDE.md)
+
 ### Velocidad y caché
 
 * Cada endpoint se guarda en caché **1 hora** según sus parámetros, y la caché se comparte entre pestañas y usuarios.

@@ -31,3 +31,9 @@ def test_crear_portafolio(client):
 def test_activo_no_encontrado(client):
     response = client.get("/activos/ZZZZ")
     assert response.status_code == 404
+
+def test_macro_colombia_tiene_tasa_propia(client):
+    r = client.get("/macro/", params={"mercado": "CO"}).json()
+    assert r["mercado"] == "CO"
+    assert 0 < r["tasa_libre_riesgo"] < 0.5
+    assert "fuente_tasa" in r

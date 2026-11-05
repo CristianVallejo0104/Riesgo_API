@@ -205,10 +205,29 @@ TICKERS_DB = {
     "TLT": "Bonos del Tesoro 20+ años (ETF)", "HYG": "Bonos high yield (ETF)",
     "LQD": "Bonos grado de inversión (ETF)", "XLF": "Sector financiero (ETF)",
     "XLK": "Sector tecnología (ETF)", "XLV": "Sector salud (ETF)", "XLE": "Sector energía (ETF)",
+    # ── Colombia: acciones en la Bolsa de Valores de Colombia (Yahoo usa el sufijo .CL, precios en COP) ──
+    "ECOPETROL.CL": "Ecopetrol (Colombia · Energía)", "BCOLOMBIA.CL": "Bancolombia ordinaria (Colombia · Financiero)",
+    "PFBCOLOM.CL": "Bancolombia preferencial (Colombia · Financiero)", "ISA.CL": "ISA (Colombia · Energía eléctrica)",
+    "GEB.CL": "Grupo Energía Bogotá (Colombia · Energía)", "CELSIA.CL": "Celsia (Colombia · Energía eléctrica)",
+    "GRUPOSURA.CL": "Grupo Sura ordinaria (Colombia · Financiero)", "PFGRUPSURA.CL": "Grupo Sura preferencial (Colombia · Financiero)",
+    "GRUPOARGOS.CL": "Grupo Argos ordinaria (Colombia · Holding)", "PFGRUPOARG.CL": "Grupo Argos preferencial (Colombia · Holding)",
+    "CEMARGOS.CL": "Cementos Argos (Colombia · Materiales)", "PFAVAL.CL": "Grupo Aval preferencial (Colombia · Financiero)",
+    "PFDAVVNDA.CL": "Davivienda preferencial (Colombia · Financiero)", "BOGOTA.CL": "Banco de Bogotá (Colombia · Financiero)",
+    "CORFICOLCF.CL": "Corficolombiana (Colombia · Financiero)", "PROMIGAS.CL": "Promigas (Colombia · Gas)",
+    "MINEROS.CL": "Mineros (Colombia · Minería de oro)", "TERPEL.CL": "Terpel (Colombia · Combustibles)",
+    "CNEC.CL": "Canacol Energy (Colombia · Gas)", "ETB.CL": "ETB (Colombia · Telecomunicaciones)",
+    "ICOLCAP.CL": "iShares MSCI COLCAP (ETF colombiano, COP)",
+    # ── Colombia: ADR y ETF que cotizan en EE. UU. (precios en USD) ──
+    "EC": "Ecopetrol ADR (Colombia en NYSE, USD)", "CIB": "Bancolombia ADR (Colombia en NYSE, USD)",
+    "AVAL": "Grupo Aval ADR (Colombia en NYSE, USD)", "GXG": "Global X MSCI Colombia (ETF en USD)",
 }
 
 TICKER_PRESETS = {
     "Base USTA": ["AAPL", "JPM", "JNJ", "XOM", "KO"],
+    "🇨🇴 Colombia — líderes del COLCAP (COP)": ["ECOPETROL.CL", "PFBCOLOM.CL", "ISA.CL", "GEB.CL", "GRUPOSURA.CL",
+                                              "CELSIA.CL"],
+    "🇨🇴 Colombia — bancos (COP)": ["PFBCOLOM.CL", "BCOLOMBIA.CL", "PFAVAL.CL", "PFDAVVNDA.CL", "BOGOTA.CL"],
+    "🇨🇴 Colombia en EE. UU. — ADR (USD)": ["EC", "CIB", "AVAL", "GXG"],
     "Tecnología": ["AAPL", "MSFT", "NVDA", "GOOGL", "AMZN", "META"],
     "Defensivo": ["JNJ", "KO", "PG", "WMT", "COST", "NEE"],
     "Financiero": ["JPM", "BAC", "GS", "V", "MA", "BLK"],
@@ -217,8 +236,22 @@ TICKER_PRESETS = {
                            "NVO", "XOM", "COST", "CAT", "NEE", "GLD"],
 }
 
-BENCHMARKS = {"^GSPC": "S&P 500", "^DJI": "Dow Jones", "^IXIC": "NASDAQ Composite",
-              "^RUT": "Russell 2000", "SPY": "S&P 500 (ETF SPY)", "QQQ": "NASDAQ-100 (ETF QQQ)"}
+BENCHMARKS_US = {"^GSPC": "S&P 500", "^DJI": "Dow Jones", "^IXIC": "NASDAQ Composite",
+                 "^RUT": "Russell 2000", "SPY": "S&P 500 (ETF SPY)", "QQQ": "NASDAQ-100 (ETF QQQ)"}
+BENCHMARKS_CO = {"^COLCAP": "COLCAP (índice de la Bolsa de Colombia)",
+                 "ICOLCAP.CL": "iShares MSCI COLCAP (ETF que replica el COLCAP, COP)",
+                 "GXG": "Global X MSCI Colombia (ETF en USD)"}
+BENCHMARKS = {**BENCHMARKS_US, **BENCHMARKS_CO}
+MERCADOS = {
+    "US": {"nombre": "🇺🇸 Estados Unidos (USD)", "moneda": "USD", "preset": "Base USTA", "benchmark": "^GSPC"},
+    "CO": {"nombre": "🇨🇴 Colombia (COP)", "moneda": "COP", "preset": "🇨🇴 Colombia — líderes del COLCAP (COP)",
+           "benchmark": "ICOLCAP.CL"},
+}
+
+
+def moneda_de(ticker: str) -> str:
+    """Moneda en la que cotiza un ticker: los de la Bolsa de Colombia (.CL) en COP; el resto en USD."""
+    return "COP" if ticker.upper().endswith(".CL") or ticker.upper() == "^COLCAP" else "USD"
 
 
 # ═══════════════════════════ 2. BARRA LATERAL ═══════════════════════════
@@ -254,8 +287,19 @@ with st.sidebar:
     pagina = st.radio("Módulo", PAGINAS[grupo], key=f"nav_{grupo}", label_visibility="collapsed")
 
     st.markdown('<div class="rl-side-label">Tu portafolio</div>', unsafe_allow_html=True)
+    mercado = st.radio("¿Dónde quieres invertir?", list(MERCADOS), format_func=lambda m: MERCADOS[m]["nombre"],
+                       horizontal=True, key="mercado",
+                       help="Define la moneda de los montos, el índice de referencia sugerido y la tasa libre de riesgo.")
+    MON = MERCADOS[mercado]["moneda"]
+    ui.set_moneda(MON)
     if "tickers_seleccionados" not in st.session_state:
         st.session_state["tickers_seleccionados"] = ["AAPL", "JPM", "JNJ", "XOM", "KO"]
+    # Al cambiar de mercado se carga su portafolio de ejemplo y su benchmark sugerido
+    if st.session_state.get("_mercado_previo", "US") != mercado:
+        st.session_state["tickers_seleccionados"] = TICKER_PRESETS[MERCADOS[mercado]["preset"]]
+        st.session_state["_ms_ver"] = st.session_state.get("_ms_ver", 0) + 1
+        st.session_state["bench_sel"] = MERCADOS[mercado]["benchmark"]
+        st.session_state["_mercado_previo"] = mercado
     for t in st.session_state["tickers_seleccionados"]:
         TICKERS_DB.setdefault(t, f"{t} (personalizado)")
 
@@ -265,13 +309,13 @@ with st.sidebar:
         if preset != "—" and st.session_state.get("_preset_aplicado") != preset:
             st.session_state["tickers_seleccionados"] = TICKER_PRESETS[preset]
             st.session_state["_preset_aplicado"] = preset
-            st.session_state.pop("ms_tickers", None)
+            st.session_state["_ms_ver"] = st.session_state.get("_ms_ver", 0) + 1
             st.rerun()
 
         tickers = st.multiselect(
             "Activos del portafolio", options=sorted(TICKERS_DB.keys()),
             default=[t for t in st.session_state["tickers_seleccionados"] if t in TICKERS_DB],
-            format_func=lambda t: f"{t} — {TICKERS_DB[t]}", key="ms_tickers",
+            format_func=lambda t: f"{t} — {TICKERS_DB[t]}", key=f"ms_tickers_{st.session_state.get('_ms_ver', 0)}",
             help="Escribe el nombre o el ticker para buscar. Se necesitan al menos 2 activos.")
         st.session_state["tickers_seleccionados"] = tickers
 
@@ -282,16 +326,27 @@ with st.sidebar:
                 TICKERS_DB.setdefault(t, f"{t} (personalizado)")
                 if t not in st.session_state["tickers_seleccionados"]:
                     st.session_state["tickers_seleccionados"].append(t)
-            st.session_state.pop("ms_tickers", None)
+            st.session_state["_ms_ver"] = st.session_state.get("_ms_ver", 0) + 1
             st.rerun()
 
-        benchmark = st.selectbox("Índice de referencia (benchmark)", list(BENCHMARKS),
-                                 format_func=lambda x: BENCHMARKS[x],
-                                 help="El 'mercado' contra el que se compara tu portafolio.")
+        opciones_bench = (list(BENCHMARKS_CO) + list(BENCHMARKS_US) if mercado == "CO"
+                          else list(BENCHMARKS_US) + list(BENCHMARKS_CO)) + ["OTRO"]
+        if st.session_state.get("bench_sel") not in opciones_bench:
+            st.session_state["bench_sel"] = MERCADOS[mercado]["benchmark"]
+        bench_sel = st.selectbox("Índice de referencia (benchmark)", opciones_bench, key="bench_sel",
+                                 format_func=lambda x: "✏️ Otro (escribir ticker)" if x == "OTRO" else BENCHMARKS[x],
+                                 help="El 'mercado' contra el que se compara tu portafolio (beta, CAPM, estrés).")
+        if bench_sel == "OTRO":
+            benchmark = st.text_input("Ticker del benchmark en Yahoo Finance", value="^GSPC", key="bench_custom",
+                                      help="Ej.: ^GSPC, ^COLCAP, ICOLCAP.CL, ^BVSP (Brasil), ^MXX (México)").strip().upper() or "^GSPC"
+            BENCHMARKS.setdefault(benchmark, benchmark)
+        else:
+            benchmark = bench_sel
 
     with st.expander("💰 Monto y nivel de confianza", expanded=False):
-        valor_portafolio = st.number_input("Valor del portafolio (USD)", min_value=100.0,
-                                           max_value=100_000_000.0, value=100_000.0, step=1_000.0)
+        valor_portafolio = st.number_input(f"Valor del portafolio ({MON})", min_value=100.0,
+                                           max_value=1e13, value=100_000.0 if MON == "USD" else 100_000_000.0,
+                                           step=1_000.0 if MON == "USD" else 1_000_000.0, key=f"valor_{MON}")
         confianza_var = st.slider(
             "Nivel de confianza del VaR (%)", min_value=80.0, max_value=99.5, value=95.0, step=0.5,
             format="%.1f%%",
@@ -300,6 +355,16 @@ with st.sidebar:
         st.caption(f"Valores habituales: 95 % (gestión interna), 99 % (Basilea, VaR), 97,5 % (Basilea III, CVaR). "
                    f"Con {confianza_var:.1%}".replace(".0%", "%") +
                    f" se espera superar el VaR ~{(1 - confianza_var) * 100:.1f} de cada 100 días.")
+
+    with st.expander("🏦 Tasa libre de riesgo", expanded=False):
+        modo_rf = st.radio("Origen", ["Automática (FRED)", "Manual"], horizontal=True, key="modo_rf",
+                           help="Es lo que pagaría una inversión sin riesgo. Se usa en Sharpe, CAPM y Markowitz.")
+        rf_manual = None
+        if modo_rf == "Manual":
+            rf_manual = st.number_input("Tasa anual (%)", value=4.5 if mercado == "US" else 9.0, step=0.25,
+                                        min_value=-2.0, max_value=60.0, key=f"rf_manual_{mercado}") / 100
+            st.caption("Referencias: EE. UU. → letras del Tesoro a 3 meses. Colombia → TES de corto plazo o la "
+                       "tasa de intervención del Banco de la República.")
 
     with st.expander("⚖️ Pesos de cada activo", expanded=False):
         peso_igual = st.checkbox("Repartir en partes iguales", value=True)
@@ -366,15 +431,39 @@ if faltantes:
 ui.registrar_colores(tickers)
 
 # ── Tasa libre de riesgo y datos macro (FRED) ──
-macro = fetch("/macro/", silencioso=True)
-tasa_fred = float(macro["tasa_libre_riesgo"]) if macro else 0.045
-fuente_rf = "FRED · Tesoro EE. UU. 3 meses" if macro else "valor de respaldo"
+macro = fetch("/macro/", {"mercado": mercado}, silencioso=True)
+if rf_manual is not None:
+    tasa_fred, fuente_rf = rf_manual, "ingresada manualmente"
+elif macro:
+    tasa_fred = float(macro["tasa_libre_riesgo"])
+    fuente_rf = macro.get("fuente_tasa", "FRED")
+    if macro.get("tasa_es_respaldo"):
+        st.sidebar.caption("⚠️ FRED no respondió: se usa un valor de respaldo para la tasa libre de riesgo. "
+                           "Puedes escribirla en 🏦 Tasa libre de riesgo → Manual.")
+else:
+    tasa_fred, fuente_rf = (0.045 if mercado == "US" else 0.09), "valor de respaldo"
+
+# Avisos de coherencia del portafolio
+_monedas = {moneda_de(t) for t in tickers}
+if len(_monedas) > 1:
+    st.sidebar.warning("Mezclas activos en COP (.CL) y en USD. Los rendimientos se calculan en la moneda de cada "
+                       "activo y el modelo NO incluye el riesgo de tipo de cambio (dólar/peso). Para un análisis "
+                       "coherente usa activos de una sola moneda, o los ADR (EC, CIB, AVAL) si quieres Colombia en USD.")
+elif _monedas and _monedas != {MON}:
+    st.sidebar.info(f"Tus activos cotizan en {_monedas.pop()}, pero el mercado elegido usa {MON}. "
+                    "Los montos se muestran en la moneda del mercado elegido.")
+if moneda_de(benchmark) not in ({moneda_de(t) for t in tickers} or {MON}):
+    st.sidebar.caption(f"ℹ️ El benchmark {benchmark} cotiza en otra moneda que tus activos; la beta incluirá el efecto del tipo de cambio.")
+if not fetch(f"/precios/{q(benchmark)}", silencioso=True):
+    st.sidebar.warning(f"No se encontraron datos de **{benchmark}** en Yahoo Finance. "
+                       + ("Prueba con **ICOLCAP.CL** (ETF que replica el COLCAP) o **GXG**." if mercado == "CO"
+                          else "Prueba con otro índice."))
 
 
 # ═══════════════════════════ UTILIDADES DE PÁGINA ═══════════════════════════
 
 def cabecera(titulo: str, descripcion: str):
-    chips = [f"{len(tickers)} activos", f"Benchmark: {BENCHMARKS.get(benchmark, benchmark)}",
+    chips = [MERCADOS[mercado]["nombre"], f"{len(tickers)} activos", f"Benchmark: {BENCHMARKS.get(benchmark, benchmark)}",
              f"Capital: {usd(valor_portafolio)}", f"VaR al {confianza_var:.1%}".replace(".0%", "%"),
              f"{fi} → {ff}", f"Tasa libre de riesgo: {pct(tasa_fred)}"]
     ui.hero(titulo, descripcion, eyebrow=GRUPO_DE.get(pagina, "RiskLab USTA"), chips=chips)
@@ -450,8 +539,9 @@ def pagina_inicio():
 
     ui.encabezado("Cómo usar el tablero en 3 pasos")
     ui.pasos([
-        ("Arma tu portafolio", "En la barra lateral elige los activos (acciones, ETF, bonos, oro...) "
-         "o carga un portafolio de ejemplo. Define cuánto dinero inviertes y qué peso tiene cada activo."),
+        ("Arma tu portafolio", "En la barra lateral elige si inviertes en Estados Unidos (USD) o en Colombia (COP), "
+         "luego los activos (acciones, ETF, bonos, oro...) o un portafolio de ejemplo. Define cuánto dinero "
+         "inviertes, el nivel de confianza y qué peso tiene cada activo."),
         ("Mira el Resumen ejecutivo", "Es la foto general: rentabilidad, riesgo, peor caída y pérdida "
          "probable en un mal día, con un semáforo que te dice si cada número es tranquilo o preocupante."),
         ("Profundiza por módulo", "Cada módulo responde una pregunta concreta. Abajo de cada resultado "
@@ -577,16 +667,16 @@ def pagina_resumen():
         fig = go.Figure()
         fig.add_trace(go.Scatter(x=serie["fecha"], y=serie["valor"] * valor_portafolio, name="Tu portafolio",
                                  line=dict(color=ui.AZUL, width=2),
-                                 hovertemplate="%{x|%d %b %Y}<br>USD %{y:,.0f}<extra>Portafolio</extra>"))
+                                 hovertemplate="%{x|%d %b %Y}<br>" + MON + " %{y:,.0f}<extra>Portafolio</extra>"))
         if d.get("serie_benchmark"):
             sb = pd.DataFrame(d["serie_benchmark"])
             sb["fecha"] = pd.to_datetime(sb["fecha"])
             fig.add_trace(go.Scatter(x=sb["fecha"], y=sb["valor"] * valor_portafolio,
                                      name=BENCHMARKS.get(benchmark, benchmark),
                                      line=dict(color=ui.TINTA_3, width=2, dash="dot"),
-                                     hovertemplate="%{x|%d %b %Y}<br>USD %{y:,.0f}<extra>Benchmark</extra>"))
+                                     hovertemplate="%{x|%d %b %Y}<br>" + MON + " %{y:,.0f}<extra>Benchmark</extra>"))
         fig.add_hline(y=valor_portafolio, line_color=ui.EJE, line_width=1)
-        fig.update_layout(**ui.layout("Evolución del dinero invertido", 360, yaxis_title="USD",
+        fig.update_layout(**ui.layout("Evolución del dinero invertido", 360, yaxis_title=MON,
                                       hovermode="x unified"))
         st.plotly_chart(fig, use_container_width=True)
     with c2:
@@ -1017,7 +1107,7 @@ def pagina_var():
         fig = go.Figure(go.Bar(
             x=["Suma de los VaR por separado", "VaR del portafolio"], y=[suma, port],
             marker_color=[ui.TINTA_3, ui.AZUL], text=[usd(suma), usd(port)], textposition="outside", width=0.5))
-        fig.update_layout(**ui.layout("Efecto de la diversificación (VaR paramétrico)", 330, yaxis_title="USD",
+        fig.update_layout(**ui.layout("Efecto de la diversificación (VaR paramétrico)", 330, yaxis_title=MON,
                                       legend=False, barcornerradius=4))
         st.plotly_chart(fig, use_container_width=True)
         ui.en_simple(f"Si cada activo se evaluara solo, el riesgo sumaría {usd(suma)}. Como no todos caen el mismo "
@@ -1057,12 +1147,12 @@ def pagina_var():
         ("CVaR histórico", dv["cvar"], "Promedio de las pérdidas peores que el VaR histórico."),
         ("CVaR paramétrico", dv["cvar_parametrico"], "Expected Shortfall bajo normalidad."),
     ]
-    tabla = pd.DataFrame([{"Método": m, "Pérdida (%)": abs(v), f"Sobre USD 100.000": abs(v) * 100_000,
+    tabla = pd.DataFrame([{"Método": m, "Pérdida (%)": abs(v), "Sobre tu portafolio": abs(v) * V,
                            f"Sobre tu posición en {t}": abs(v) * capital, "Idea": idea} for m, v, idea in metodos])
     c1, c2 = st.columns([1.15, 1])
     with c1:
-        st.dataframe(tabla.style.format({"Pérdida (%)": "{:.2%}", "Sobre USD 100.000": "USD {:,.0f}",
-                                         f"Sobre tu posición en {t}": "USD {:,.0f}"}),
+        st.dataframe(tabla.style.format({"Pérdida (%)": "{:.2%}", "Sobre tu portafolio": MON + " {:,.0f}",
+                                         f"Sobre tu posición en {t}": MON + " {:,.0f}"}),
                      use_container_width=True, hide_index=True, height=260)
         st.caption(f"Tu posición en {t}: {usd(capital)} ({pct(pesos.get(t, 0), 1)} del portafolio). "
                    f"Horizonte: {h} día(s); para más de 1 día se usa la regla de la raíz del tiempo.")
@@ -1159,8 +1249,8 @@ def pagina_stress():
         x=orden["usd"], y=orden["escenario"], orientation="h",
         marker_color=[ui.ESTADO[est_imp(v)] for v in orden["impacto_portafolio"]],
         text=[f"{pct(v, 1)} · {usd(u)}" for v, u in zip(orden["impacto_portafolio"], orden["usd"])],
-        textposition="auto", hovertemplate="%{y}<br>USD %{x:,.0f}<extra></extra>"))
-    fig.update_layout(**ui.layout("Pérdida del portafolio en cada escenario", 420, xaxis_title="USD",
+        textposition="auto", hovertemplate="%{y}<br>" + MON + " %{x:,.0f}<extra></extra>"))
+    fig.update_layout(**ui.layout("Pérdida del portafolio en cada escenario", 420, xaxis_title=MON,
                                   legend=False, barcornerradius=4))
     st.plotly_chart(fig, use_container_width=True)
 
@@ -1348,7 +1438,7 @@ def pagina_markowitz():
             ui.en_simple(
                 f"El portafolio de máximo Sharpe ahora **vende en corto** {txt_c}: el modelo apuesta a que esos "
                 f"activos rendirán relativamente menos. Con ese dinero compra más de {txt_l}. "
-                f"Así, por cada USD 100 de tu capital tienes posiciones por USD {bruta * 100:,.0f} en total, "
+                f"Así, por cada 100 de tu capital tienes posiciones por {bruta * 100:,.0f} en total, "
                 "lo que amplifica tanto las ganancias como las pérdidas.", "Interpretación")
         else:
             ui.en_simple("Aun pudiendo vender en corto, el portafolio óptimo **no lo hace**: ningún activo "
@@ -1450,11 +1540,11 @@ def pagina_markowitz():
     pe = ms if elegido == "Máximo Sharpe" else mv
     dist = pd.DataFrame([{"Activo": t,
                           "Posición": "▼ Venta en corto" if w < -0.001 else "▲ Compra (larga)" if w > 0.001 else "— Sin posición",
-                          "Peso sugerido": w, "Monto (USD)": w * valor_portafolio,
-                          "Peso actual": act["pesos"][t], "Cambio (USD)": (w - act["pesos"][t]) * valor_portafolio}
+                          "Peso sugerido": w, f"Monto ({MON})": w * valor_portafolio,
+                          "Peso actual": act["pesos"][t], f"Cambio ({MON})": (w - act["pesos"][t]) * valor_portafolio}
                          for t, w in pe["pesos"].items()])
-    st.dataframe(dist.style.format({"Peso sugerido": "{:.1%}", "Monto (USD)": "USD {:,.0f}", "Peso actual": "{:.1%}",
-                                    "Cambio (USD)": "{:+,.0f}"}), use_container_width=True, hide_index=True)
+    st.dataframe(dist.style.format({"Peso sugerido": "{:.1%}", f"Monto ({MON})": MON + " {:,.0f}", "Peso actual": "{:.1%}",
+                                    f"Cambio ({MON})": "{:+,.0f}"}), use_container_width=True, hide_index=True)
     ui.nota("La optimización usa rendimientos y correlaciones PASADOS. Pequeños cambios en los datos pueden "
             "cambiar mucho los pesos óptimos; el portafolio de mínima varianza suele ser más estable porque no "
             "depende de pronosticar rendimientos.", "warn")
@@ -1487,19 +1577,26 @@ def pagina_macro():
              "¿Tu portafolio le gana al mercado? ¿Y cómo están las tasas de interés y la inflación, que "
              "afectan a todos los activos?")
     curva = fetch("/renta-fija/curva", silencioso=True)
+    if mercado == "CO":
+        ui.nota("Estás analizando el mercado colombiano. La tasa libre de riesgo usada es la de Colombia "
+                f"({pct(tasa_fred)}, {fuente_rf}). La curva e inflación que siguen son de EE. UU. (FRED no publica la "
+                "curva de TES); sirven como contexto global, porque las tasas de EE. UU. también mueven a Colombia.",
+                "info", "Contexto para Colombia")
     if macro:
-        tasa_real = (1 + macro["tasa_libre_riesgo"]) / (1 + macro["inflacion_anual_pct"] / 100) - 1
+        infl_us = macro["inflacion_anual_pct"]
         pend = curva["nelson_siegel"]["pendiente_10a_3m"] if curva else None
-        ui.kpi_grid([
-            {"label": "Tasa libre de riesgo (3 meses)", "value": pct(macro["tasa_libre_riesgo"]), "sub": "Bonos del Tesoro EE. UU."},
-            {"label": "Inflación anual (IPC)", "value": f"{macro['inflacion_anual_pct']:.2f}%",
-             "estado": "bueno" if macro["inflacion_anual_pct"] < 2.5 else "alerta" if macro["inflacion_anual_pct"] < 4 else "serio",
-             "sub": "Meta de la Fed: 2 %"},
-            {"label": "Tasa real", "value": pct(tasa_real), "sub": "Rendimiento del Tesoro descontando inflación"},
-            {"label": "Pendiente 10 años − 3 meses", "value": f"{pend:+.2f} p.p." if pend is not None else "—",
+        items = [{"label": "Tasa libre de riesgo usada", "value": pct(tasa_fred), "sub": fuente_rf}]
+        if mercado == "US":
+            items.append({"label": "Tasa real (EE. UU.)", "value": pct((1 + tasa_fred) / (1 + infl_us / 100) - 1),
+                          "sub": "Tasa sin riesgo descontando la inflación"})
+        items += [
+            {"label": "Inflación anual EE. UU. (IPC)", "value": f"{infl_us:.2f}%",
+             "estado": "bueno" if infl_us < 2.5 else "alerta" if infl_us < 4 else "serio", "sub": "Meta de la Fed: 2 %"},
+            {"label": "Pendiente EE. UU. 10 años − 3 meses", "value": f"{pend:+.2f} p.p." if pend is not None else "—",
              "estado": ("critico" if pend < 0 else "alerta" if pend < 0.5 else "bueno") if pend is not None else None,
              "tag": ("Curva invertida" if pend < 0 else "Curva plana" if pend < 0.5 else "Curva normal") if pend is not None else None},
-        ])
+        ]
+        ui.kpi_grid(items)
     if curva:
         dm = curva["datos_mercado"]
         ns = pd.DataFrame(curva["nelson_siegel"]["curva_suave"])
@@ -1517,7 +1614,7 @@ def pagina_macro():
     if not requiere_portafolio():
         return
     ui.encabezado(f"Tu portafolio vs {BENCHMARKS.get(benchmark, benchmark)}")
-    b = fetch("/macro/benchmark", {**P_BASE, "benchmark": benchmark})
+    b = fetch("/macro/benchmark", {**P_BASE, "benchmark": benchmark, "rf": tasa_fred})
     if not b:
         return
     dif = b["retorno_acumulado_portafolio"] - b["retorno_acumulado_benchmark"]
@@ -1571,13 +1668,13 @@ def pagina_renta_fija():
                                     help="Interés anual que paga el bono sobre su nominal.") / 100
             frec = c3.selectbox("Frecuencia de pago", list(FREC), index=1, format_func=FREC.get,
                                 help="Los bonos del Tesoro de EE. UU. y muchos corporativos pagan semestralmente.")
-        nominal = c4.number_input("Valor nominal (USD)", value=1000.0, min_value=1.0, max_value=1e9, step=100.0,
+        nominal = c4.number_input(f"Valor nominal ({MON})", value=1000.0, min_value=1.0, max_value=1e12, step=100.0,
                                   help="Lo que te devuelven al vencimiento. Suele ser 100 o 1.000.")
 
         st.markdown("**2. Plazo y tasa de mercado**")
         c5, c6, c7 = st.columns([1, 1, 1])
         venc = int(c5.number_input("Años al vencimiento", value=10, min_value=1, max_value=50))
-        usar_curva = c6.toggle("Usar la tasa del mercado (curva del Tesoro, FRED)", value=True,
+        usar_curva = c6.toggle("Usar la tasa del mercado (curva del Tesoro, FRED)", value=(mercado == "US"),
                                help="Toma la tasa de la curva al mismo plazo del bono.")
         ytm = None
         if not usar_curva:
@@ -1586,6 +1683,9 @@ def pagina_renta_fija():
                                   help="La tasa que exige el mercado hoy para este tipo de bono.") / 100
         else:
             c7.caption("Desactiva el interruptor para escribir tu propio rendimiento (YTM).")
+        if mercado == "CO":
+            st.caption("🇨🇴 La curva automática es la del Tesoro de EE. UU. Para un bono colombiano (TES) escribe "
+                       "el YTM manualmente; puedes consultarlo en el Banco de la República o en la BVC.")
 
     params = {"tasa_cupon": cupon, "vencimiento": venc, "frecuencia": frec, "valor_nominal": nominal}
     if ytm is not None:
@@ -1646,7 +1746,7 @@ def pagina_renta_fija():
         fig.add_trace(go.Scatter(x=[y0 * 100], y=[p0], mode="markers", name="Hoy",
                                  marker=dict(color=ui.ROL["actual"], size=10, line=dict(color="white", width=2))))
         fig.update_layout(**ui.layout("Si cambia la tasa de mercado, ¿cuánto vale el bono?", 400,
-                                      xaxis_title="Tasa de mercado / YTM (%)", yaxis_title="Precio (USD)",
+                                      xaxis_title="Tasa de mercado / YTM (%)", yaxis_title=f"Precio ({MON})",
                                       hovermode="x unified"))
         st.plotly_chart(fig, use_container_width=True)
     with c2:
@@ -1658,7 +1758,7 @@ def pagina_renta_fija():
         fig.add_vline(x=d["duracion_macaulay"], line_dash="dash", line_color=ui.ROL["actual"],
                       annotation_text="Duración", annotation_position="top left")
         fig.update_layout(**ui.layout("Calendario de pagos del bono", 400, xaxis_title="Año",
-                                      yaxis_title="USD", barmode="overlay"))
+                                      yaxis_title=MON, barmode="overlay"))
         fig.update_traces(opacity=0.85, selector=dict(type="bar"))
         st.plotly_chart(fig, use_container_width=True)
         st.caption("La línea punteada (duración) es el 'centro de gravedad' de los pagos: el momento promedio en "
@@ -1720,15 +1820,16 @@ def pagina_opciones():
         sigma = c5.number_input("Volatilidad anual (%)", value=round(vol_hist * 100, 1), min_value=1.0, max_value=300.0,
                                 step=1.0, help="Por defecto, la volatilidad histórica del activo.") / 100
     T = meses / 12
+    M = moneda_de(t)
     d = fetch("/opciones/black-scholes", {"S": S, "K": K, "T": T, "r": r, "sigma": sigma})
     if not d:
         return
     p, g = d["precios"], d["greeks"]
     estado_call = "dentro del dinero" if S > K else "fuera del dinero" if S < K else "en el dinero"
     ui.kpi_grid([
-        {"label": "Prima de la CALL", "value": f"USD {p['call']:.2f}",
+        {"label": "Prima de la CALL", "value": f"{M} {p['call']:,.2f}",
          "sub": f"Intrínseco {p['valor_intrinseco_call']:.2f} + tiempo {p['valor_tiempo_call']:.2f}", "tag": estado_call, "estado": "neutral"},
-        {"label": "Prima de la PUT", "value": f"USD {p['put']:.2f}",
+        {"label": "Prima de la PUT", "value": f"{M} {p['put']:,.2f}",
          "sub": f"Intrínseco {p['valor_intrinseco_put']:.2f} + tiempo {p['valor_tiempo_put']:.2f}"},
         {"label": "Prob. de ejercer la call", "value": pct(p["prob_ejercicio_call"], 1), "sub": "N(d₂), en el mundo neutral al riesgo"},
         {"label": "Prob. de ejercer la put", "value": pct(p["prob_ejercicio_put"], 1), "sub": "N(−d₂)"},
@@ -1738,15 +1839,15 @@ def pagina_opciones():
 
     griegas = pd.DataFrame([
         {"Griega": "Delta (Δ)", "Call": g["delta_call"], "Put": g["delta_put"],
-         "Interpretación con tus datos": f"Si {t} sube USD 1, la call gana USD {g['delta_call']:.2f} y la put pierde USD {abs(g['delta_put']):.2f}."},
+         "Interpretación con tus datos": f"Si {t} sube {M} 1, la call gana {M} {g['delta_call']:.2f} y la put pierde {M} {abs(g['delta_put']):.2f}."},
         {"Griega": "Gamma (Γ)", "Call": g["gamma"], "Put": g["gamma"],
-         "Interpretación con tus datos": f"Por cada USD 1 que sube {t}, el delta cambia {g['gamma']:.4f}. Máxima cerca del strike."},
+         "Interpretación con tus datos": f"Por cada {M} 1 que sube {t}, el delta cambia {g['gamma']:.4f}. Máxima cerca del strike."},
         {"Griega": "Vega (ν)", "Call": g["vega"], "Put": g["vega"],
-         "Interpretación con tus datos": f"Si la volatilidad sube 1 p.p. (de {sigma:.0%} a {sigma + 0.01:.0%}), ambas primas suben USD {g['vega']:.2f}."},
+         "Interpretación con tus datos": f"Si la volatilidad sube 1 p.p. (de {sigma:.0%} a {sigma + 0.01:.0%}), ambas primas suben {M} {g['vega']:,.2f}."},
         {"Griega": "Theta (Θ)", "Call": g["theta_call"], "Put": g["theta_put"],
-         "Interpretación con tus datos": f"Cada día que pasa, la call pierde USD {abs(g['theta_call']):.3f} de valor por el paso del tiempo."},
+         "Interpretación con tus datos": f"Cada día que pasa, la call pierde {M} {abs(g['theta_call']):,.3f} de valor por el paso del tiempo."},
         {"Griega": "Rho (ρ)", "Call": g["rho_call"], "Put": g["rho_put"],
-         "Interpretación con tus datos": f"Si la tasa sube 1 p.p., la call sube USD {g['rho_call']:.2f} y la put cambia USD {g['rho_put']:.2f}."},
+         "Interpretación con tus datos": f"Si la tasa sube 1 p.p., la call sube {M} {g['rho_call']:,.2f} y la put cambia {M} {g['rho_put']:,.2f}."},
     ])
     st.dataframe(griegas.style.format({"Call": "{:.4f}", "Put": "{:.4f}"}), use_container_width=True, hide_index=True)
 
@@ -1759,7 +1860,7 @@ def pagina_opciones():
         fig.add_hline(y=0, line_color=ui.EJE)
         fig.add_vline(x=K, line_dash="dot", line_color=ui.TINTA_3, annotation_text="Strike")
         fig.update_layout(**ui.layout("Ganancia o pérdida al vencimiento", 360, xaxis_title=f"Precio de {t} al vencimiento",
-                                      yaxis_title="USD por opción", hovermode="x unified"))
+                                      yaxis_title=f"{M} por opción", hovermode="x unified"))
         st.plotly_chart(fig, use_container_width=True)
         st.caption(f"Punto de equilibrio de la call: {K + p['call']:.2f} · de la put: {K - p['put']:.2f}. "
                    "La pérdida máxima al comprar una opción es la prima pagada.")
@@ -1774,7 +1875,7 @@ def pagina_opciones():
         fig.add_trace(go.Scatter(x=spots, y=np.maximum(spots - K, 0), name="Valor intrínseco",
                                  line=dict(color=ui.TINTA_3, width=1.5, dash="dash")))
         fig.update_layout(**ui.layout("Precio de la call según el precio del activo", 360, xaxis_title=f"Precio de {t}",
-                                      yaxis_title="Prima (USD)", hovermode="x unified"))
+                                      yaxis_title=f"Prima ({M})", hovermode="x unified"))
         st.plotly_chart(fig, use_container_width=True)
         st.caption("La distancia entre cada curva y la línea punteada es el 'valor tiempo': se va perdiendo a medida "
                    "que se acerca el vencimiento (theta).")
@@ -1809,6 +1910,11 @@ def pagina_opciones():
 # ─────────────────────────── GLOSARIO ───────────────────────────
 GLOSARIO = [
     ("Activo", "Cualquier cosa en la que se invierte: acciones, bonos, ETF, oro, etc."),
+    ("ADR", "Certificado que permite comprar en EE. UU. (en dólares) acciones de una empresa extranjera. Ej.: EC = Ecopetrol, CIB = Bancolombia."),
+    ("BVC", "Bolsa de Valores de Colombia. En Yahoo Finance sus acciones llevan el sufijo .CL (ej. ECOPETROL.CL)."),
+    ("COLCAP", "Índice de las acciones más negociadas de la Bolsa de Colombia; es el 'S&P 500' colombiano. El ETF ICOLCAP lo replica."),
+    ("Riesgo cambiario", "Riesgo de que cambie el precio del dólar frente al peso. Afecta a quien invierte en una moneda distinta a la suya."),
+    ("TES", "Bonos del Gobierno de Colombia. Su tasa de corto plazo sirve como tasa libre de riesgo en pesos."),
     ("Acción", "Una pequeña parte de la propiedad de una empresa."),
     ("Alfa de Jensen", "Rendimiento obtenido por encima (o por debajo) de lo que el CAPM exige según su beta."),
     ("Asimetría", "Mide si la distribución de rendimientos está inclinada hacia pérdidas (negativa) o ganancias (positiva)."),
@@ -1979,7 +2085,7 @@ def pagina_ml():
                 confianza = "ALTA" if prob > 0.7 else "MEDIA" if prob > 0.55 else "BAJA"
                 mejor_mod = estado_ml.get('mejor_modelo', 'XGBoost') if estado_ml else 'XGBoost'
                 st.markdown(f"""
-                **Precio actual {ticker_p}:** USD {precio_act:,.2f}  
+                **Precio actual {ticker_p}:** {moneda_de(ticker_p)} {precio_act:,.2f}  
                 **Señal:** {emoji} {label} con confianza **{confianza}** ({prob:.1%})  
                 **Modelo usado:** {mejor_mod}
                 """)

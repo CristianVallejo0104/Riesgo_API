@@ -10,10 +10,17 @@ settings = get_settings()
 FALLBACKS = {
     "tasa_libre_riesgo": 0.045,
     "inflacion": 3.5,
+    "tasa_libre_riesgo_co": 0.09,   # valor de respaldo para Colombia (actualízalo si no hay FRED)
+}
+
+# Series de FRED por mercado
+SERIES_RF = {
+    "US": "DGS3MO",            # Tesoro de EE. UU. a 3 meses (diaria)
+    "CO": "COLIR3TIB01STM",    # Colombia: tasa interbancaria a 3 meses (OCDE, mensual)
 }
 
 _cache_curva = {"data": None, "timestamp": 0}
-_cache_tasa  = {"data": None, "timestamp": 0}
+_cache_tasa  = {}   # {mercado: {"data": ..., "timestamp": ...}}
 CACHE_TTL = 3600
 
 FRED_BASE = "https://api.stlouisfed.org/fred/series/observations"
@@ -41,15 +48,26 @@ class MacroService:
             logger.warning(f"No se pudo obtener {serie}: {e}")
         return None
 
-    def tasa_libre_riesgo(self) -> float:
+    def tasa_libre_riesgo(self, mercado: str = "US") -> float:
+        """Tasa libre de riesgo anual en decimal para el mercado pedido ("US" o "CO")."""
+        info = self.tasa_libre_riesgo_info(mercado)
+        return info["tasa"]
+
+    def tasa_libre_riesgo_info(self, mercado: str = "US") -> dict:
+        mercado = mercado.upper() if mercado else "US"
         ahora = time.time()
-        if _cache_tasa["data"] and (ahora - _cache_tasa["timestamp"]) < CACHE_TTL:
-            return _cache_tasa["data"]
-        resultado = self._get_serie(settings.fred_risk_free_series)
-        tasa = resultado / 100 if resultado else FALLBACKS["tasa_libre_riesgo"]
-        _cache_tasa["data"] = tasa
-        _cache_tasa["timestamp"] = ahora
-        return tasa
+        c = _cache_tasa.get(mercado)
+        if c and (ahora - c["timestamp"]) < CACHE_TTL:
+            return c["data"]
+        serie = settings.fred_risk_free_series if mercado == "US" else SERIES_RF.get(mercado, "DGS3MO")
+        valor = self._get_serie(serie)
+        if valor is not None:
+            data = {"tasa": valor / 100, "fuente": f"FRED · {serie}", "es_respaldo": False}
+        else:
+            respaldo = FALLBACKS["tasa_libre_riesgo_co"] if mercado == "CO" else FALLBACKS["tasa_libre_riesgo"]
+            data = {"tasa": respaldo, "fuente": "valor de respaldo (sin conexión a FRED)", "es_respaldo": True}
+        _cache_tasa[mercado] = {"data": data, "timestamp": ahora}
+        return data
 
     def curva_rendimiento(self) -> dict:
         ahora = time.time()

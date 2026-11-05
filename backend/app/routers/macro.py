@@ -14,10 +14,14 @@ settings = get_settings()
 
 
 @router.get("/")
-def obtener_macro(db: DBSession):
+def obtener_macro(db: DBSession, mercado: str = Query("US", pattern="^(US|CO|us|co)$")):
     macro = MacroService()
+    rf = macro.tasa_libre_riesgo_info(mercado)
     return {
-        "tasa_libre_riesgo": macro.tasa_libre_riesgo(),
+        "mercado": mercado.upper(),
+        "tasa_libre_riesgo": rf["tasa"],
+        "fuente_tasa": rf["fuente"],
+        "tasa_es_respaldo": rf["es_respaldo"],
         "inflacion_anual_pct": macro.inflacion(),
         "curva": macro.curva_rendimiento(),
     }
@@ -25,6 +29,7 @@ def obtener_macro(db: DBSession):
 
 @router.get("/benchmark")
 def metricas_benchmark(db: DBSession, benchmark: str = "^GSPC",
+                       rf: float | None = Query(default=None, description="Tasa libre de riesgo anual; si se omite se usa la de EE. UU."),
                        tickers: list[str] = Query(default=None),
                        pesos: list[float] = Query(default=None),
                        fecha_inicio: str = Query(default=None),
@@ -57,7 +62,7 @@ def metricas_benchmark(db: DBSession, benchmark: str = "^GSPC",
     information_ratio = float(exceso.mean() * 252 / tracking_error) if tracking_error > 0 else 0.0
     max_dd, _, _ = _max_drawdown(rp)
     max_dd_bench, _, _ = _max_drawdown(rb)
-    rf = MacroService().tasa_libre_riesgo()
+    rf = MacroService().tasa_libre_riesgo() if rf is None else rf
     vol_p = float(rp.std() * np.sqrt(252))
 
     return {

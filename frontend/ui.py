@@ -85,10 +85,19 @@ def pct(x, dec: int = 2, signo: bool = False) -> str:
     return f"{x * 100:+.{dec}f}%" if signo else f"{x * 100:.{dec}f}%"
 
 
+MONEDA = {"codigo": "USD"}
+
+
+def set_moneda(codigo: str):
+    """Moneda en la que se muestran los montos del portafolio (USD o COP)."""
+    MONEDA["codigo"] = codigo
+
+
 def usd(x, dec: int = 0) -> str:
+    """Formatea un monto en la moneda activa (el nombre se conserva por compatibilidad)."""
     if x is None:
         return "—"
-    return f"USD {x:,.{dec}f}"
+    return f"{MONEDA['codigo']} {x:,.{dec}f}"
 
 
 def num(x, dec: int = 2) -> str:
